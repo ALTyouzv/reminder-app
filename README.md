@@ -1,55 +1,66 @@
-# Reminders: setup guide
+# Reminders
 
-Your own to-do and reminder app. It pops up when you sign in to or unlock either PC, keeps both PCs in sync, and sends due reminders to your iPhone through Telegram, even when both PCs are off.
+A simple to-do and reminder app that's all yours. Add tasks from your PC, your phone, or by messaging a Telegram bot, and get reminders on your phone through Telegram, even when your PC is off.
 
-Setup takes about 15 minutes, and everything is free.
-
-## What you need
-
-- A free **Cloudflare** account. Sign up at https://dash.cloudflare.com/sign-up
-- **Telegram** on your iPhone
-- **Node.js LTS** on the PC you set up from. The setup script tries to install it for you.
+It's free and runs on your own free Cloudflare account, so nobody else (including whoever shared this with you) can see your tasks.
 
 ---
 
-## Step 1: Create your Telegram bot (2 min)
+## Set it up (about 5 minutes, no installing anything)
+
+### 1. Make a Telegram bot (2 min)
 
 1. In Telegram, search for **@BotFather** and open it.
 2. Send `/newbot`.
-3. Pick a display name (for example *My Reminders*) and a username ending in `bot` (for example `sara_reminders_bot`).
-4. BotFather replies with a **token** like `123456789:AAH...`. Keep that message open, because you'll paste the token in Step 2.
+3. Pick a name (for example *My Reminders*) and a username that ends in `bot` (for example `sara_reminders_bot`).
+4. BotFather replies with a **token** like `123456789:AAH...`. Copy it, because you'll need it in the next step.
 
-## Step 2: Put the app online (run once, on ONE PC)
+### 2. Click the button
 
-1. Unzip this folder somewhere permanent, for example `Documents\reminder-app`.
-2. Double-click **`setup.cmd`**.
-3. Follow the prompts:
-   - A browser tab opens. Sign in to Cloudflare and click **Allow**.
-   - If it asks for a *workers.dev subdomain*, type any name (for example `sara`).
-   - Copy the address it prints (`https://reminders.<name>.workers.dev`) and paste it back into the window.
-   - Choose an **app password** (8+ characters).
-   - Paste the **bot token** from Step 1.
-4. When it finishes, your app opens in the browser.
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ALTyouzv/reminder-app/tree/main/worker)
 
-## Step 3: Connect your phone
+1. Sign in to Cloudflare, or make a free account.
+2. Connect your GitHub account when it asks. It saves a copy of the app there for you.
+3. Fill in the form:
+   - **APP_KEY**: choose a password for your app (8+ characters).
+   - **TELEGRAM_TOKEN**: paste the bot token from step 1.
+   - **TZ**: your time zone, for example `Asia/Riyadh`.
+   - Leave everything else as it is.
+4. Click **Deploy** and wait about a minute.
+5. Open the address it gives you, something like `https://reminders.<your-name>.workers.dev`. That's your app. Bookmark it.
 
-1. Sign in to the app with your password.
-2. Click the **gear** (Settings), then **Connect Telegram**. Open that link on your iPhone (Copy link and send it to yourself, or click it if Telegram Desktop is installed) and tap **Start**.
+### 3. Connect your phone
+
+1. Open your app and sign in with your password.
+2. Click the **gear** (Settings), then **Connect Telegram**. Open that link on your phone and tap **Start**.
 3. Back in the app, click **I tapped Start**, then **Send test**. Your phone should buzz.
 
-## Step 4: Make it pop up on startup (run on EACH PC)
+That's it. You're done.
 
-1. On this PC: double-click **`windows\install-startup.cmd`** and press Enter to accept the address.
-2. On your laptop: copy the whole folder over (USB, OneDrive, etc.) and run **`windows\install-startup.cmd`** there too. Your laptop doesn't need Node.js or Step 2.
-3. Sign in once with your password on each PC.
+---
 
-From then on, the Reminders window opens every time you sign in or unlock (including waking from sleep). It also adds a **Reminders** shortcut to your Start Menu and Desktop.
+## Optional: make it pop up on your PC
 
-> If your PC wakes from sleep **without** asking for a PIN/password, there's no "unlock", so the popup won't fire. To fix it, go to Settings → Accounts → Sign-in options → "If you've been away, when should Windows require you to sign in again?" and choose **When PC wakes up from sleep**.
+Skip this if you're happy just opening the app from a bookmark.
 
-## Optional: iPhone home screen
+If you want the Reminders window to **pop up automatically every time you turn on or unlock your Windows PC**:
 
-Open your app address in Safari, tap **Share**, then **Add to Home Screen**. You get the same list as an app icon.
+1. On this page, click the green **Code** button, then **Download ZIP**.
+2. Unzip it somewhere permanent, for example `Documents\reminder-app`.
+3. Open the `windows` folder and double-click **`install-startup.cmd`**.
+   - If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**.
+4. Paste your app address when it asks, and press Enter.
+5. Sign in once with your password when the window opens.
+
+From now on it pops up every time you sign in or unlock your PC, and you also get a **Reminders** shortcut on your Desktop and Start Menu. Do the same on any other PC you use.
+
+To turn the popup off, double-click **`windows\uninstall-startup.cmd`**. Your tasks stay saved.
+
+> If your PC wakes from sleep **without** asking for your PIN or password, the popup won't show (Windows doesn't count it as an "unlock"). To fix it: Settings → Accounts → Sign-in options → "If you've been away, when should Windows require you to sign in again?" → **When PC wakes up from sleep**.
+
+## Optional: put it on your iPhone home screen
+
+Open your app address in Safari, tap **Share**, then **Add to Home Screen**. It looks and works like an app.
 
 ---
 
@@ -57,10 +68,9 @@ Open your app address in Safari, tap **Share**, then **Add to Home Screen**. You
 
 **In the app**
 
-- Type a task and press **Enter**. Add details or context, pick a reminder time (or a quick option like *Tomorrow 9 am*), and set it to repeat daily or weekly if you want.
+- Type a task and press **Enter**. You can add details, pick a reminder time (or a quick option like *Tomorrow 9 am*), get a heads-up before it's due (10 min, 30 min, 1 hour or 1 day early), and make it repeat daily or weekly.
 - Click a task to edit or delete it. Click the circle to mark it done.
-- Ticking a repeating task moves it to its next date.
-- While the window is open, a due reminder shows a banner with a sound, and a Windows notification if you allow it in Settings.
+- While the app is open, a due reminder shows a banner with a sound, plus a Windows notification if you allow it in Settings.
 
 **In Telegram** (message your bot)
 
@@ -77,22 +87,36 @@ Each reminder comes with **Done / 10 min / 1 hour** buttons.
 
 ## Good to know
 
-- **Time zone:** set to Riyadh (`TZ` in `worker/wrangler.toml`).
-- **Free limits:** Cloudflare's free plan covers this easily (100k requests a day).
-- **Remove the popup:** run `windows\uninstall-startup.cmd`. Your tasks stay saved.
-- **Forgot your password:** in the `worker` folder, run `npx wrangler secret put APP_KEY` and choose a new one.
-- **Privacy:** the bot only answers your phone. Other people who message it get ignored.
+- **Free:** Cloudflare's free plan covers this easily.
+- **Private:** your bot only answers your phone. Anyone else who messages it gets ignored.
+- **Your name in the app:** to make it say "Good morning, Sara", open `worker/src/ui.html` in your GitHub copy, find `var NAME = ''`, and put your name between the quotes. Cloudflare updates your app automatically after you save.
+- **Change your password or bot token:** Cloudflare dashboard → Workers & Pages → *reminders* → Settings → Variables and Secrets.
+
+---
+
+<details>
+<summary>Other way to install: setup script on Windows (for advanced users)</summary>
+
+If you'd rather not use the button, you can set it up from a Windows PC with Node.js:
+
+1. Download the ZIP (green **Code** button → **Download ZIP**) and unzip it.
+2. Double-click **`setup.cmd`** and follow the prompts. It signs you in to Cloudflare, creates the database, publishes the app, and asks for your password and bot token.
+3. Continue from **step 3** above.
+
+After changing the code, double-click **`update.cmd`** to publish the new version.
+
+</details>
 
 ## Files
 
 ```
-setup.cmd / setup.ps1         one-time cloud setup
 worker/                       the app (runs on Cloudflare)
   src/index.js                server: storage, reminders, Telegram bot
   src/ui.html                 the app screen
-  schema.sql                  database tables
   wrangler.toml               Cloudflare settings
+  package.json                settings for the Deploy button
 windows/
-  install-startup.cmd         popup at sign-in/unlock + shortcuts
-  uninstall-startup.cmd       remove it
+  install-startup.cmd         optional: popup at sign-in/unlock + shortcuts
+  uninstall-startup.cmd       remove the popup
+setup.cmd / update.cmd        optional: install/update from Windows instead of the button
 ```

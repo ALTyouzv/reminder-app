@@ -1,0 +1,27 @@
+{
+  "name": "reminders",
+  "private": true,
+  "description": "To-do list that pops up on your PC and sends reminders to your phone through Telegram",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "APP_KEY": {
+        "description": "Choose a password for your app (8+ characters). You'll type it once on each device."
+      },
+      "TELEGRAM_TOKEN": {
+        "description": "Your Telegram bot token. In Telegram, message @BotFather, send /newbot, and copy the token it gives you (looks like 123456789:AAH...)."
+      },
+      "TZ": {
+        "description": "Your time zone, e.g. Asia/Riyadh, Asia/Dubai, Africa/Cairo."
+      },
+      "DB": {
+        "description": "Where your tasks are stored. The default name is fine."
+      }
+    }
+  }
+}

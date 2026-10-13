@@ -11,6 +11,16 @@ const DAY = 86400000;
 let migrated = false;
 async function migrate(env) {
   if (migrated) return;
+  // Create the tables on first run (so the "Deploy to Cloudflare" button needs no extra step).
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '',
+      remind_at INTEGER, repeat TEXT NOT NULL DEFAULT 'none', lead_min INTEGER NOT NULL DEFAULT 0,
+      early_sent INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0, notified INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`),
+    env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks (done, notified, remind_at)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)'),
+  ]);
   for (const sql of [
     'ALTER TABLE tasks ADD COLUMN lead_min INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE tasks ADD COLUMN early_sent INTEGER NOT NULL DEFAULT 0',

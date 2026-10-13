@@ -16,8 +16,7 @@ type = "Text"
 globs = ["**/*.html"]
 fallthrough = true
 
-# setup.ps1 fills in database_id automatically
+# The database is created automatically (Deploy button or setup.cmd)
 [[d1_databases]]
 binding = "DB"
 database_name = "reminders-db"
-database_id = "PASTE_DATABASE_ID_HERE"

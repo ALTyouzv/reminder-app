@@ -48,7 +48,7 @@ try {
   Step 3 "Creating the database"
   $tomlPath = Join-Path $worker 'wrangler.toml'
   $toml = [IO.File]::ReadAllText($tomlPath)
-  if ($toml -match 'PASTE_DATABASE_ID_HERE') {
+  if ($toml -notmatch 'database_id\s*=') {
     function Find-DbId {
       $txt = WrText d1 list --json
       $s = $txt.IndexOf('['); $e = $txt.LastIndexOf(']')
@@ -66,7 +66,7 @@ try {
       if (-not $id -and $out -match '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})') { $id = $Matches[1] }
     }
     if (-not $id) { Fail "Could not create or find the database." }
-    $toml = $toml -replace 'PASTE_DATABASE_ID_HERE', $id
+    $toml = $toml -replace '(database_name\s*=\s*"reminders-db")', ('$1' + "`r`ndatabase_id = `"$id`"")
     [IO.File]::WriteAllText($tomlPath, $toml)
     Write-Host "Database id: $id"
   } else { Write-Host "Database already set up." }
