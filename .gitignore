@@ -1,0 +1,5 @@
+node_modules/
+.wrangler/
+setup-log.txt
+windows/config.json
+.dev.vars

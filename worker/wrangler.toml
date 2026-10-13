@@ -1,0 +1,23 @@
+name = "reminders"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Your time zone (used for Telegram messages and "at 18:30" quick-add)
+[vars]
+TZ = "Asia/Riyadh"
+
+# Check for due reminders every minute
+[triggers]
+crons = ["* * * * *"]
+
+# Bundle the app page as text
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
+# setup.ps1 fills in database_id automatically
+[[d1_databases]]
+binding = "DB"
+database_name = "reminders-db"
+database_id = "PASTE_DATABASE_ID_HERE"

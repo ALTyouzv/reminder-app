@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reminders</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111315">
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --panel-2: #f0f0ec; --line: #e3e3dd;
+  --text: #1b1d1f; --muted: #6b6f72; --faint: #9a9ea1;
+  --accent: #1f7a5a; --accent-soft: #e2f1ea; --accent-text: #ffffff;
+  --danger: #b4362c; --danger-soft: #fbe9e7; --warn: #a3620a; --warn-soft: #fbf0dc;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(0,0,0,.06);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111315; --panel: #191c1f; --panel-2: #20242700; --line: #2a2f33;
+    --text: #e9ebec; --muted: #9aa1a6; --faint: #6c7378;
+    --accent: #3fb68a; --accent-soft: #173a2e; --accent-text: #0b1f17;
+    --danger: #f07167; --danger-soft: #3a1c1a; --warn: #f0b45a; --warn-soft: #3a2c14;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+  :root { --panel-2: #202427; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 15px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Noto Sans Arabic", sans-serif;
+  -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.wrap { max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; padding-top: max(20px, env(safe-area-inset-top)); }
+.hidden { display: none !important; }
+
+/* header */
+header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.hello { font-size: 22px; font-weight: 650; letter-spacing: -.01em; margin: 0; }
+.sub { color: var(--muted); margin-top: 2px; font-size: 14px; }
+.icon-btn { background: transparent; border: 1px solid var(--line); border-radius: 10px; width: 38px; height: 38px; display: grid; place-items: center; color: var(--muted); flex: none; }
+.icon-btn:hover { color: var(--text); background: var(--panel); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* summary chips */
+.summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
+.chip b { color: var(--text); font-weight: 600; }
+.chip.over { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+.chip.over b { color: var(--danger); }
+
+/* composer */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.composer { padding: 6px; margin-bottom: 22px; }
+.composer .row { display: flex; gap: 6px; align-items: center; }
+.composer input.title { flex: 1; border: 0; background: transparent; padding: 10px 10px; outline: none; font-size: 16px; min-width: 0; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 14px; font-weight: 550; }
+.btn:hover { background: var(--panel-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary:hover { filter: brightness(1.05); background: var(--accent); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--text); background: var(--panel-2); }
+.btn.danger { color: var(--danger); border-color: transparent; background: transparent; }
+.btn.danger:hover { background: var(--danger-soft); }
+.btn.small { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
+.more { padding: 4px 8px 8px; display: grid; gap: 10px; }
+textarea { width: 100%; resize: vertical; min-height: 64px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: var(--bg); outline: none; }
+textarea:focus, .field input:focus, .field select:focus, .login input:focus { border-color: var(--accent); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 5px 11px; font-size: 13px; color: var(--muted); }
+.preset:hover { color: var(--text); }
+.preset.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+.fields { display: flex; gap: 8px; flex-wrap: wrap; }
+.field { display: grid; gap: 4px; font-size: 12px; color: var(--muted); flex: 1 1 160px; }
+.field input, .field select { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--bg); outline: none; font-size: 14px; color: var(--text); min-width: 0; width: 100%; }
+.actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+
+/* list */
+.group { margin-bottom: 20px; }
+.group h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 650; margin: 0 4px 8px; display: flex; gap: 6px; align-items: center; }
+.group h2 .n { color: var(--muted); font-weight: 500; }
+.group.over h2 { color: var(--danger); }
+.list { overflow: hidden; }
+.item { display: flex; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); align-items: flex-start; }
+.item:first-child { border-top: 0; }
+.item.flash { animation: flash 1.6s ease; }
+@keyframes flash { 0%,40% { background: var(--accent-soft); } 100% { background: transparent; } }
+.check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--faint); background: transparent; margin-top: 1px; display: grid; place-items: center; padding: 0; }
+.check:hover { border-color: var(--accent); }
+.check svg { width: 12px; height: 12px; opacity: 0; color: var(--accent-text); }
+.item.done .check { background: var(--accent); border-color: var(--accent); }
+.item.done .check svg { opacity: 1; }
+.body { flex: 1; min-width: 0; cursor: pointer; }
+.t { font-weight: 550; overflow-wrap: anywhere; }
+.item.done .t { color: var(--faint); text-decoration: line-through; font-weight: 450; }
+.d { color: var(--muted); font-size: 13.5px; margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
+.tag.over { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+.tag.soon { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.edit { padding: 12px 14px; border-top: 1px solid var(--line); display: grid; gap: 10px; background: var(--panel); }
+.edit:first-child { border-top: 0; }
+.edit input.title { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: var(--bg); outline: none; width: 100%; font-weight: 550; }
+.edit input.title:focus { border-color: var(--accent); }
+.edit .actions { justify-content: space-between; }
+.empty { text-align: center; color: var(--muted); padding: 40px 16px; }
+.empty .big { font-size: 17px; color: var(--text); font-weight: 600; margin-bottom: 4px; }
+details.done-group summary { cursor: pointer; list-style: none; }
+details.done-group summary::-webkit-details-marker { display: none; }
+
+/* banner + toast */
+.banner { display: flex; gap: 12px; align-items: center; padding: 12px 14px; margin-bottom: 16px; border-radius: 14px; background: var(--accent); color: var(--accent-text); box-shadow: var(--shadow); }
+.banner .bt { flex: 1; min-width: 0; }
+.banner b { display: block; overflow-wrap: anywhere; }
+.banner .btn { background: rgba(255,255,255,.18); border-color: transparent; color: inherit; }
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow); z-index: 20; max-width: calc(100% - 32px); }
+
+/* login + settings */
+.login { max-width: 360px; margin: 12vh auto 0; text-align: center; padding: 0 16px; }
+.login .logo { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 14px; display: block; }
+.login h1 { font-size: 22px; margin: 0 0 4px; }
+.login p { color: var(--muted); margin: 0 0 18px; }
+.login input { width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 12px 14px; outline: none; margin-bottom: 10px; font-size: 16px; }
+.login .btn { width: 100%; padding: 11px; }
+.err { color: var(--danger); font-size: 14px; min-height: 20px; margin-top: 8px; }
+.settings { padding: 16px; margin-bottom: 22px; display: grid; gap: 14px; }
+.settings h3 { margin: 0; font-size: 15px; }
+.settings p { margin: 0; color: var(--muted); font-size: 14px; }
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.status.ok { color: var(--accent); } .status.ok .dot { background: var(--accent); }
+.status.bad { color: var(--warn); } .status.bad .dot { background: var(--warn); }
+.sep { height: 1px; background: var(--line); }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login" class="login hidden">
+  <img class="logo" src="/icon.svg" alt="">
+  <h1>Reminders</h1>
+  <p>Enter your app password to continue.</p>
+  <form id="loginForm">
+    <input id="pw" type="password" placeholder="App password" autocomplete="current-password" autofocus>
+    <button class="btn primary" type="submit">Open</button>
+  </form>
+  <div class="err" id="loginErr"></div>
+</div>
+
+<!-- App -->
+<div id="app" class="wrap hidden">
+  <header>
+    <div>
+      <h1 class="hello" id="hello">Hello</h1>
+      <div class="sub" id="today"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="icon-btn" id="refreshBtn" title="Refresh" aria-label="Refresh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden">
+    <div class="bt"><small id="bannerLabel">Reminder</small><b id="bannerTitle"></b></div>
+    <button class="btn small" id="bannerDone">Done</button>
+    <button class="btn small" id="bannerClose">Dismiss</button>
+  </div>
+
+  <section id="settings" class="card settings hidden">
+    <div>
+      <h3>Phone alerts (Telegram)</h3>
+      <p id="tgText">Checking…</p>
+    </div>
+    <div class="actions" style="justify-content:flex-start" id="tgActions"></div>
+    <div class="sep"></div>
+    <div>
+      <h3>Desktop notifications</h3>
+      <p id="notifText"></p>
+    </div>
+    <div class="actions" style="justify-content:flex-start">
+      <button class="btn small" id="notifBtn">Allow notifications</button>
+    </div>
+    <div class="sep"></div>
+    <div class="actions" style="justify-content:space-between">
+      <p style="font-size:13px">Signed in on this device.</p>
+      <button class="btn small danger" id="logoutBtn">Sign out</button>
+    </div>
+  </section>
+
+  <div class="summary" id="summary"></div>
+
+  <form class="card composer" id="composer" autocomplete="off">
+    <div class="row">
+      <input class="title" id="newTitle" placeholder="What do you want to remember?" dir="auto" maxlength="300">
+      <button class="btn primary" type="submit" id="addBtn">Add</button>
+    </div>
+    <div class="more hidden" id="newMore">
+      <textarea id="newDetails" placeholder="Details or context (optional)" dir="auto"></textarea>
+      <div class="presets" id="newPresets"></div>
+      <div class="fields">
+        <label class="field">Remind me at<input type="datetime-local" id="newWhen"></label>
+        <label class="field">Repeat
+          <select id="newRepeat"><option value="none">Doesn't repeat</option><option value="daily">Every day</option><option value="weekly">Every week</option></select>
+        </label>
+        <label class="field">Remind me before
+          <select id="newLead"><option value="0">No early reminder</option><option value="10">10 min before</option><option value="30">30 min before</option><option value="60">1 hour before</option><option value="1440">1 day before</option></select>
+        </label>
+      </div>
+    </div>
+  </form>
+
+  <div id="lists"></div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+(function () {
+  'use strict';
+  var KEY_STORE = 'reminders.key';
+  var NAME = ''; // put your name here, e.g. 'Sara'
+  var state = { key: null, tasks: [], editing: null, alerted: {}, loaded: false, offset: 0 };
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---- one window at a time: a newer window closes the older one
+  try {
+    var born = Date.now();
+    var bc = new BroadcastChannel('reminders-window');
+    bc.onmessage = function (e) { if (e.data && e.data.born > born) window.close(); };
+    bc.postMessage({ born: born });
+  } catch (_) {}
+
+  // ---- storage (may be unavailable)
+  function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (_) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+
+  // ---- api
+  function api(method, path, body) {
+    return fetch(path, {
+      method: method,
+      headers: { 'authorization': 'Bearer ' + state.key, 'content-type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.status === 401) { signOut('Wrong password'); throw new Error('unauthorized'); }
+        if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+        return d;
+      });
+    });
+  }
+
+  // ---- time helpers
+  var DAY = 86400000;
+  function now() { return Date.now(); }
+  function startOfDay(ts) { var d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+  function toLocalInput(ts) {
+    if (ts == null) return '';
+    var d = new Date(ts), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function fromLocalInput(v) { if (!v) return null; var t = new Date(v).getTime(); return isNaN(t) ? null : t; }
+  function clock(ts) { return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  function when(ts) {
+    var t0 = startOfDay(now()), d = startOfDay(ts), diff = Math.round((d - t0) / DAY);
+    var label;
+    if (diff === 0) label = 'Today';
+    else if (diff === 1) label = 'Tomorrow';
+    else if (diff === -1) label = 'Yesterday';
+    else if (diff > 1 && diff < 7) label = new Date(ts).toLocaleDateString([], { weekday: 'long' });
+    else label = new Date(ts).toLocaleDateString([], { day: 'numeric', month: 'short', year: new Date(ts).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+    return label + ', ' + clock(ts);
+  }
+  function rel(ts) {
+    var m = Math.round((ts - now()) / 60000), a = Math.abs(m), s;
+    if (a < 1) return 'now';
+    if (a < 60) s = a + ' min';
+    else if (a < 2880) s = Math.round(a / 60) + ' h';
+    else s = Math.round(a / 1440) + ' d';
+    return m < 0 ? s + ' ago' : 'in ' + s;
+  }
+  function presets() {
+    var n = new Date(), list = [];
+    var at = function (dayOffset, h, m) { var d = new Date(); d.setDate(d.getDate() + dayOffset); d.setHours(h, m || 0, 0, 0); return d.getTime(); };
+    list.push({ label: 'In 1 hour', ts: now() + 3600000 - (now() % 60000) });
+    if (n.getHours() < 18) list.push({ label: 'This evening', ts: at(0, 19) });
+    else if (n.getHours() < 21) list.push({ label: 'Tonight 10 pm', ts: at(0, 22) });
+    list.push({ label: 'Tomorrow 9 am', ts: at(1, 9) });
+    var toWeekend = (5 - n.getDay() + 7) % 7 || 7; // next Friday
+    list.push({ label: 'Friday', ts: at(toWeekend, 10) });
+    list.push({ label: 'No reminder', ts: null });
+    return list;
+  }
+
+  // ---- render
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  function renderHeader() {
+    var h = new Date().getHours();
+    var g = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    $('hello').textContent = NAME ? g + ', ' + NAME : g;
+    renderClock();
+  }
+  function renderClock() {
+    var d = new Date();
+    $('today').textContent = d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }) + '  \u00b7  ' + clock(d.getTime());
+  }
+
+  function groups() {
+    var t = now(), endToday = startOfDay(t) + DAY;
+    var g = { over: [], today: [], later: [], anytime: [], done: [] };
+    state.tasks.forEach(function (x) {
+      if (x.done) g.done.push(x);
+      else if (x.remind_at == null) g.anytime.push(x);
+      else if (x.remind_at <= t) g.over.push(x);
+      else if (x.remind_at < endToday) g.today.push(x);
+      else g.later.push(x);
+    });
+    g.done.sort(function (a, b) { return b.updated_at - a.updated_at; });
+    return g;
+  }
+
+  function renderSummary(g) {
+    var html = '';
+    if (g.over.length) html += '<span class="chip over"><b>' + g.over.length + '</b> overdue</span>';
+    html += '<span class="chip"><b>' + g.today.length + '</b> later today</span>';
+    html += '<span class="chip"><b>' + (g.later.length) + '</b> upcoming</span>';
+    if (g.anytime.length) html += '<span class="chip"><b>' + g.anytime.length + '</b> anytime</span>';
+    $('summary').innerHTML = state.tasks.length ? html : '';
+  }
+
+  var LEADS = [[0, 'No early reminder'], [10, '10 min before'], [30, '30 min before'], [60, '1 hour before'], [1440, '1 day before']];
+  function leadShort(m) { return m === 1440 ? '1 day' : m === 60 ? '1 hour' : m + ' min'; }
+  var CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
+
+  function itemHtml(x) {
+    if (state.editing === x.id) return editHtml(x);
+    var tags = '';
+    if (x.remind_at != null && !x.done) {
+      var over = x.remind_at <= now(), soon = !over && x.remind_at - now() < 3600000;
+      tags += '<span class="tag' + (over ? ' over' : soon ? ' soon' : '') + '">' + esc(when(x.remind_at)) + ' · ' + esc(rel(x.remind_at)) + '</span>';
+    }
+    if (x.lead_min && x.remind_at != null && !x.done) tags += '<span class="tag">🔔 ' + leadShort(x.lead_min) + ' before</span>';
+    if (x.repeat !== 'none') tags += '<span class="tag">↻ ' + (x.repeat === 'daily' ? 'Every day' : 'Every week') + '</span>';
+    return '<div class="item' + (x.done ? ' done' : '') + '" data-id="' + x.id + '">' +
+      '<button class="check" data-act="toggle" aria-label="' + (x.done ? 'Mark not done' : 'Mark done') + '">' + CHECK + '</button>' +
+      '<div class="body" data-act="edit">' +
+        '<div class="t" dir="auto">' + esc(x.title) + '</div>' +
+        (x.details ? '<div class="d" dir="auto">' + esc(x.details) + '</div>' : '') +
+        (tags ? '<div class="meta">' + tags + '</div>' : '') +
+      '</div></div>';
+  }
+
+  function editHtml(x) {
+    return '<form class="edit" data-id="' + x.id + '">' +
+      '<input class="title" name="title" value="' + esc(x.title) + '" dir="auto" maxlength="300" required>' +
+      '<textarea name="details" placeholder="Details or context" dir="auto">' + esc(x.details) + '</textarea>' +
+      '<div class="fields">' +
+        '<label class="field">Remind me at<input type="datetime-local" name="when" value="' + toLocalInput(x.remind_at) + '"></label>' +
+        '<label class="field">Repeat<select name="repeat">' +
+          ['none', 'daily', 'weekly'].map(function (r) { return '<option value="' + r + '"' + (x.repeat === r ? ' selected' : '') + '>' + ({ none: "Doesn't repeat", daily: 'Every day', weekly: 'Every week' })[r] + '</option>'; }).join('') +
+        '</select></label>' +
+        '<label class="field">Remind me before<select name="lead">' +
+          LEADS.map(function (l) { return '<option value="' + l[0] + '"' + ((x.lead_min || 0) === l[0] ? ' selected' : '') + '>' + l[1] + '</option>'; }).join('') +
+        '</select></label>' +
+      '</div>' +
+      '<div class="actions"><button type="button" class="btn small danger" data-act="delete">Delete</button>' +
+      '<span style="display:flex;gap:6px"><button type="button" class="btn small ghost" data-act="cancel">Cancel</button><button type="submit" class="btn small primary">Save</button></span></div>' +
+    '</form>';
+  }
+
+  function section(key, title, items, extraClass) {
+    if (!items.length) return '';
+    return '<div class="group ' + (extraClass || '') + '"><h2>' + title + ' <span class="n">' + items.length + '</span></h2>' +
+      '<div class="card list">' + items.map(itemHtml).join('') + '</div></div>';
+  }
+
+  function render() {
+    renderHeader();
+    var g = groups();
+    renderSummary(g);
+    var html = '';
+    html += section('over', 'Overdue', g.over, 'over');
+    html += section('today', 'Later today', g.today);
+    html += section('later', 'Upcoming', g.later);
+    html += section('anytime', 'Anytime', g.anytime);
+    if (g.done.length) {
+      var open = state.editing && g.done.some(function (x) { return x.id === state.editing; });
+      html += '<details class="group done-group"' + (open || load('reminders.showDone') === '1' ? ' open' : '') + ' id="doneGroup"><summary><h2>Done <span class="n">' + g.done.length + '</span> ▾</h2></summary>' +
+        '<div class="card list">' + g.done.slice(0, 50).map(itemHtml).join('') + '</div></details>';
+    }
+    if (!state.tasks.length && state.loaded) {
+      html = '<div class="card empty"><div class="big">Your list is clear</div>Add something above. It shows up on your other PC too, and reminds your phone at the right time.</div>';
+    }
+    $('lists').innerHTML = html;
+    var dg = $('doneGroup');
+    if (dg) dg.addEventListener('toggle', function () { store('reminders.showDone', dg.open ? '1' : '0'); });
+    var ef = document.querySelector('form.edit input.title');
+    if (ef && !ef.dataset.focused) { ef.dataset.focused = '1'; }
+  }
+
+  // ---- data
+  function refresh(quiet) {
+    return api('GET', '/api/tasks').then(function (d) {
+      state.tasks = d.tasks; state.loaded = true;
+      if (!quiet || state.editing == null) render();
+      checkDue();
+    }).catch(function (e) { if (e.message !== 'unauthorized' && !quiet) toast(e.message); });
+  }
+
+  function replaceTask(t) {
+    var i = state.tasks.findIndex(function (x) { return x.id === t.id; });
+    if (i >= 0) state.tasks[i] = t; else state.tasks.push(t);
+  }
+
+  // ---- composer
+  var chosen = null;
+  function renderPresets() {
+    $('newPresets').innerHTML = presets().map(function (p, i) {
+      var on = (p.ts === null && chosen === null && $('newWhen').value === '') ? false : (chosen !== null && p.ts === chosen);
+      return '<button type="button" class="preset' + (on ? ' on' : '') + '" data-i="' + i + '">' + esc(p.label) + '</button>';
+    }).join('');
+  }
+  $('newTitle').addEventListener('focus', function () { $('newMore').classList.remove('hidden'); renderPresets(); });
+  $('newTitle').addEventListener('input', function () { $('newMore').classList.remove('hidden'); });
+  $('newPresets').addEventListener('click', function (e) {
+    var b = e.target.closest('.preset'); if (!b) return;
+    var p = presets()[Number(b.dataset.i)];
+    chosen = p.ts; $('newWhen').value = toLocalInput(p.ts); renderPresets();
+  });
+  $('newWhen').addEventListener('input', function () { chosen = fromLocalInput($('newWhen').value); renderPresets(); });
+  $('newDetails').addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('composer').requestSubmit(); });
+  $('composer').addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { $('newMore').classList.add('hidden'); document.activeElement.blur(); }
+  });
+  $('composer').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var title = $('newTitle').value.trim();
+    if (!title) { $('newTitle').focus(); return; }
+    var body = { title: title, details: $('newDetails').value.trim(), remind_at: fromLocalInput($('newWhen').value), repeat: $('newRepeat').value, lead_min: Number($('newLead').value) };
+    if (body.remind_at != null && body.remind_at <= now() - 60000 && body.repeat === 'none') {
+      if (!confirmPast()) return;
+    }
+    $('addBtn').disabled = true;
+    api('POST', '/api/tasks', body).then(function (d) {
+      replaceTask(d.task);
+      $('newTitle').value = ''; $('newDetails').value = ''; $('newWhen').value = ''; $('newRepeat').value = 'none'; $('newLead').value = '0'; chosen = null;
+      renderPresets(); render(); flash(d.task.id);
+      toast(d.task.remind_at ? 'Added · reminder ' + when(d.task.remind_at) : 'Added');
+      $('newTitle').focus();
+    }).catch(function (e) { toast(e.message); }).then(function () { $('addBtn').disabled = false; });
+  });
+  function confirmPast() { toast('That time has already passed. Pick a future time.'); return false; }
+
+  // ---- list actions
+  $('lists').addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act]'); if (!el) return;
+    var host = el.closest('[data-id]'); if (!host) return;
+    var id = Number(host.dataset.id), act = el.dataset.act;
+    var task = state.tasks.find(function (x) { return x.id === id; });
+    if (act === 'toggle') toggle(task);
+    if (act === 'edit') { state.editing = id; render(); var f = document.querySelector('form.edit input.title'); if (f) f.focus(); }
+    if (act === 'cancel') { state.editing = null; render(); }
+    if (act === 'delete') {
+      api('DELETE', '/api/tasks/' + id).then(function () {
+        state.tasks = state.tasks.filter(function (x) { return x.id !== id; });
+        state.editing = null; render(); toast('Deleted');
+      }).catch(function (e) { toast(e.message); });
+    }
+  });
+  $('lists').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var f = e.target, id = Number(f.dataset.id);
+    var body = { title: f.title.value.trim(), details: f.details.value.trim(), remind_at: fromLocalInput(f.when.value), repeat: f.repeat.value, lead_min: Number(f.lead.value) };
+    if (!body.title) return;
+    api('PATCH', '/api/tasks/' + id, body).then(function (d) {
+      replaceTask(d.task); state.editing = null; render(); flash(id); toast('Saved');
+    }).catch(function (e) { toast(e.message); });
+  });
+  $('lists').addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && state.editing != null) { state.editing = null; render(); }
+  });
+
+  function toggle(task) {
+    if (!task) return;
+    api('PATCH', '/api/tasks/' + task.id, { done: !task.done }).then(function (d) {
+      replaceTask(d.task); render();
+      if (!task.done && !d.task.done) toast('Done for now · next ' + when(d.task.remind_at));
+      else if (d.task.done) toast('Nice, done.');
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  // ---- in-window alerts while the app is open
+  var bannerTask = null;
+  function checkDue() {
+    var t = now();
+    state.tasks.forEach(function (x) {
+      if (x.done || x.remind_at == null) return;
+      var k = x.id + ':' + x.remind_at;
+      // only alert for reminders that come due while this window is open
+      if (x.remind_at <= t && x.remind_at > state.openedAt && !state.alerted[k]) {
+        state.alerted[k] = true; alertTask(x);
+      }
+      // early heads-up ("remind me before")
+      if (x.lead_min) {
+        var e = x.remind_at - x.lead_min * 60000, ek = 'e' + k;
+        if (e <= t && x.remind_at > t && e > state.openedAt && !state.alerted[ek]) {
+          state.alerted[ek] = true; alertTask(x, 'Coming up ' + rel(x.remind_at));
+        }
+      }
+    });
+  }
+  function alertTask(x, label) {
+    bannerTask = x;
+    $('bannerLabel').textContent = label || 'Reminder';
+    $('bannerTitle').textContent = x.title;
+    $('banner').classList.remove('hidden');
+    beep();
+    try {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        var n = new Notification((label ? '🔔 ' : '⏰ ') + x.title, { body: label ? label + ' · ' + when(x.remind_at) : (x.details || when(x.remind_at)), icon: '/icon.svg', tag: 'r' + x.id, requireInteraction: true });
+        n.onclick = function () { window.focus(); n.close(); };
+      }
+    } catch (_) {}
+    if (state.editing == null) render();
+  }
+  $('bannerClose').addEventListener('click', function () { $('banner').classList.add('hidden'); });
+  $('bannerDone').addEventListener('click', function () {
+    $('banner').classList.add('hidden');
+    if (bannerTask) toggle(state.tasks.find(function (x) { return x.id === bannerTask.id; }));
+  });
+  function beep() {
+    try {
+      var C = window.AudioContext || window.webkitAudioContext; var ctx = new C();
+      [0, 0.18].forEach(function (d) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + d);
+        g.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + d + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + d + 0.16);
+        o.start(ctx.currentTime + d); o.stop(ctx.currentTime + d + 0.18);
+      });
+    } catch (_) {}
+  }
+
+  // ---- settings
+  $('settingsBtn').addEventListener('click', function () {
+    var s = $('settings'); s.classList.toggle('hidden');
+    if (!s.classList.contains('hidden')) { loadTelegram(); renderNotif(); }
+  });
+  $('refreshBtn').addEventListener('click', function () { refresh().then(function () { toast('Up to date'); }); });
+  $('logoutBtn').addEventListener('click', function () { signOut(); });
+
+  function renderNotif() {
+    var p = ('Notification' in window) ? Notification.permission : 'unsupported';
+    $('notifText').textContent = p === 'granted' ? 'On. While this window is open you get a pop-up when a reminder is due.'
+      : p === 'denied' ? 'Blocked in the browser settings for this site.'
+      : p === 'unsupported' ? 'Not supported here. You still get the in-app banner and Telegram.'
+      : 'Get a Windows pop-up when a reminder is due while this window is open.';
+    $('notifBtn').classList.toggle('hidden', p !== 'default');
+  }
+  $('notifBtn').addEventListener('click', function () {
+    try { Notification.requestPermission().then(renderNotif); } catch (_) {}
+  });
+
+  function loadTelegram() {
+    $('tgText').textContent = 'Checking…'; $('tgActions').innerHTML = '';
+    api('POST', '/api/telegram/setup').catch(function () { return api('GET', '/api/telegram'); }).then(renderTelegram)
+      .catch(function (e) { $('tgText').textContent = e.message; });
+  }
+  function renderTelegram(s) {
+    var a = $('tgActions');
+    if (!s.configured) { $('tgText').innerHTML = 'The bot token is not set on the server yet. Run the setup script again and paste your BotFather token.'; a.innerHTML = ''; return; }
+    if (s.error) { $('tgText').textContent = 'Telegram error: ' + s.error; a.innerHTML = ''; return; }
+    if (s.connected) {
+      $('tgText').innerHTML = '<span class="status ok"><span class="dot"></span>Connected to @' + esc(s.bot || 'bot') + '</span><br>Due reminders go to your phone even when both PCs are off. You can also message the bot to add tasks.';
+      a.innerHTML = '<button class="btn small" id="tgTest">Send test</button><button class="btn small ghost" id="tgOff">Disconnect</button>';
+      $('tgTest').onclick = function () { api('POST', '/api/telegram/test').then(function () { toast('Sent. Check your phone.'); }).catch(function (e) { toast(e.message); }); };
+      $('tgOff').onclick = function () { api('POST', '/api/telegram/disconnect').then(loadTelegram); };
+    } else {
+      $('tgText').innerHTML = '<span class="status bad"><span class="dot"></span>Not connected</span><br>Open the link on your iPhone (or scan it from Telegram Desktop), then tap <b>Start</b>.';
+      a.innerHTML = '<a class="btn small primary" style="text-decoration:none" target="_blank" rel="noopener" href="' + esc(s.link) + '">Connect Telegram</a>' +
+        '<button class="btn small" id="tgCopy">Copy link</button><button class="btn small ghost" id="tgRe">I tapped Start</button>';
+      $('tgCopy').onclick = function () { try { navigator.clipboard.writeText(s.link); toast('Link copied'); } catch (_) { prompt('Copy this link', s.link); } };
+      $('tgRe').onclick = loadTelegram;
+    }
+  }
+
+  // ---- misc
+  var toastTimer;
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.add('hidden'); }, 2600);
+  }
+  function flash(id) {
+    var el = document.querySelector('.item[data-id="' + id + '"]');
+    if (el) { el.classList.add('flash'); el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  }
+
+  // ---- auth flow
+  function signOut(msg) {
+    store(KEY_STORE, null); state.key = null; state.tasks = []; state.loaded = false;
+    $('app').classList.add('hidden'); $('login').classList.remove('hidden');
+    $('loginErr').textContent = msg || ''; $('pw').value = ''; $('pw').focus();
+  }
+  function start() {
+    $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+    state.openedAt = now();
+    renderHeader(); render(); refresh();
+  }
+  $('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var k = $('pw').value.trim(); if (!k) return;
+    state.key = k;
+    fetch('/api/tasks', { headers: { authorization: 'Bearer ' + k } }).then(function (r) {
+      if (r.ok) { store(KEY_STORE, k); start(); }
+      else $('loginErr').textContent = r.status === 401 ? 'Wrong password' : 'Server error (' + r.status + ')';
+    }).catch(function () { $('loginErr').textContent = 'Could not reach the server. Check your internet.'; });
+  });
+
+  state.key = load(KEY_STORE);
+  if (state.key) start(); else { $('login').classList.remove('hidden'); $('pw').focus(); }
+
+  // live clock in the header
+  setInterval(function () { if (state.key) renderClock(); }, 5000);
+
+  // poll for changes from your other PC / Telegram, and keep times fresh
+  setInterval(function () { if (state.key && !document.hidden) refresh(true); }, 30000);
+  setInterval(function () { if (state.key) { checkDue(); if (state.editing == null && document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') render(); } }, 15000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.key) refresh(true); });
+})();
+</script>
+</body>
+</html>
