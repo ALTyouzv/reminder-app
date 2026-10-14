@@ -68,7 +68,9 @@ Open your app address in Safari, tap **Share**, then **Add to Home Screen**. It 
 
 **In the app**
 
-- Type a task and press **Enter**. You can add details, pick a reminder time (or a quick option like *Tomorrow 9 am*), get a heads-up before it's due (10 min, 30 min, 1 hour or 1 day early), and make it repeat daily or weekly.
+- **Type it the way you'd say it** and press **Enter**, for example `Quiz Thursday 10am, remind me a day before`. The AI fills in the date, time, repeat and early heads-up, and shows what it understood. Press **Enter** again to save, or change anything first. Works in English and Arabic.
+- You can also set things yourself: details, a reminder time (or a quick option like *Tomorrow 9 am*), a heads-up before it's due (10 min, 30 min, 1 hour or 1 day early), and daily or weekly repeats.
+- **Calendar tab:** see your week (Sunday to Saturday). On a big screen each day shows its tasks; on a phone or the small popup you get a week strip with dots. Tap a day to see its tasks, or **+ Add task** to add one on that day.
 - Click a task to edit or delete it. Click the circle to mark it done.
 - While the app is open, a due reminder shows a banner with a sound, plus a Windows notification if you allow it in Settings.
 
@@ -76,18 +78,21 @@ Open your app address in Safari, tap **Share**, then **Add to Home Screen**. It 
 
 | You send | What happens |
 |---|---|
-| `Call mom at 18:30` | Adds a task with a reminder at 18:30 |
-| `Submit report tomorrow 9am` | Reminder tomorrow at 9:00 |
+| `Submit report Thursday 10pm, remind me an hour before` | Adds it for Thursday 22:00 with a 1-hour heads-up |
+| `Gym every Sunday at 6pm` | Weekly reminder |
 | `Check oven in 20m` | Reminder in 20 minutes |
 | `Buy milk` | Adds it with no reminder |
+| `/plan` | Today's plan right now |
 | `/list` | Shows your open tasks with numbers |
 | `/done 12` | Completes task #12 |
 
-Each reminder comes with **Done / 10 min / 1 hour** buttons.
+Each reminder comes with **Done / 10 min / 1 hour** buttons, and each added task has an **Undo** button in case the AI got it wrong.
+
+**Morning plan:** every day at 11:00 the bot sends today's tasks, anything overdue, and a short tip on what to do first. Change the time or turn it off in Settings.
 
 ## Good to know
 
-- **Free:** Cloudflare's free plan covers this easily.
+- **Free:** Cloudflare's free plan covers this easily, including the AI (Cloudflare Workers AI gives every account a free daily allowance, far more than one person uses). If the AI is ever unavailable, tasks are still added the simple way.
 - **Private:** your bot only answers your phone. Anyone else who messages it gets ignored.
 - **Your name in the app:** to make it say "Good morning, Sara", open `worker/src/ui.html` in your GitHub copy, find `var NAME = ''`, and put your name between the quotes. Cloudflare updates your app automatically after you save.
 - **Change your password or bot token:** Cloudflare dashboard → Workers & Pages → *reminders* → Settings → Variables and Secrets.

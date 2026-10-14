@@ -43,7 +43,10 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(migrate(env).then(() => sendDueReminders(env)));
+    ctx.waitUntil(migrate(env).then(async () => {
+      await sendDueReminders(env);
+      try { await maybeSendBrief(env); } catch (e) { console.error('morning plan failed', e); }
+    }));
   },
 };
 
@@ -60,6 +63,7 @@ async function route(request, env, ctx) {
   }
   if (method === 'GET' && path === '/manifest.webmanifest') return manifest();
   if (method === 'GET' && path === '/icon.svg') return icon();
+  if (method === 'GET' && path === '/apple-touch-icon.png') return touchIcon();
 
   // Telegram webhook (secret path, no bearer token)
   if (path.startsWith('/telegram/')) {
@@ -95,6 +99,36 @@ async function route(request, env, ctx) {
       await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();
       return json({ ok: true });
     }
+  }
+
+  // AI: understand a naturally typed task
+  if (path === '/api/parse' && method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const text = String(body.text || '').trim().slice(0, 500);
+    if (!text) return json({ error: 'Type something first' }, 400);
+    const ai = await aiParse(env, text);
+    if (ai) return json({ ai: true, parsed: ai });
+    const q = parseQuickAdd(text, env.TZ || 'Asia/Riyadh');
+    return json({ ai: false, parsed: { title: q.title || text, details: '', remind_at: q.remind_at, repeat: 'none', lead_min: 0 } });
+  }
+
+  // morning plan settings
+  if (path === '/api/brief' && method === 'GET') return json(await briefSettings(env));
+  if (path === '/api/brief' && method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    if ('enabled' in body) await setSetting(env, 'brief_enabled', body.enabled ? '1' : '0');
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(body.time || ''))) {
+      await setSetting(env, 'brief_time', body.time);
+      // if the new time is later today, allow today's plan to go out at that time
+      if (body.time > localNow(env).hm) await setSetting(env, 'brief_last', '');
+    }
+    return json(await briefSettings(env));
+  }
+  if (path === '/api/brief/test' && method === 'POST') {
+    const chat = await getSetting(env, 'chat_id');
+    if (!chat) return json({ error: 'Connect Telegram first.' }, 400);
+    await sendBrief(env, chat);
+    return json({ ok: true });
   }
 
   // telegram settings
@@ -312,6 +346,7 @@ async function telegramSetup(env, origin) {
   await setSetting(env, 'webhook_url', hook);
   try {
     await tg(env, 'setMyCommands', { commands: [
+      { command: 'plan', description: "Today's plan" },
       { command: 'list', description: 'Show open tasks' },
       { command: 'add', description: 'Add a task, e.g. /add Call mom at 18:30' },
       { command: 'done', description: 'Complete a task by number, e.g. /done 12' },
@@ -324,12 +359,13 @@ async function telegramSetup(env, origin) {
 const HELP = [
   '<b>Reminders bot</b>',
   '',
-  'Send any text to add it as a task.',
-  'Add a time at the end:',
-  '• <code>Call mom at 18:30</code>',
-  '• <code>Submit report tomorrow 9am</code>',
-  '• <code>Check the oven in 20m</code>',
+  'Just type what you need to remember, the way you would say it:',
+  '• <code>Submit stats assignment Thursday 10pm, remind me an hour before</code>',
+  '• <code>Call mom tomorrow evening</code>',
+  '• <code>Gym every Sunday at 6pm</code>',
+  '• <code>اتصل على الدكتور بكرة الساعة ١٠</code>',
   '',
+  '/plan — today\'s plan right now',
   '/list — open tasks',
   '/done 12 — complete task #12',
 ].join('\n');
@@ -345,6 +381,15 @@ async function handleTelegram(update, env) {
     const id = Number(idStr);
     const task = await getTask(env, id);
     let note = 'Task not found';
+    if (action === 'undo') {
+      if (task) await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();
+      await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: task ? 'Removed' : 'Already gone' });
+      await tg(env, 'editMessageText', {
+        chat_id: chatId, message_id: q.message.message_id, parse_mode: 'HTML',
+        text: '↩️ <s>' + esc(task ? task.title : 'Task') + '</s>\n<i>Removed</i>',
+      }).catch(() => {});
+      return;
+    }
     if (task && action === 'done') {
       const updated = await updateTask(env, id, { done: true });
       note = updated.done ? 'Marked done' : 'Done — next: ' + fmtTime(env, updated.remind_at);
@@ -401,12 +446,167 @@ async function handleTelegram(update, env) {
     const updated = await updateTask(env, id, { done: true });
     return reply(updated.done ? '✅ Done: ' + esc(task.title) : '✅ Done for now. Next: ' + fmtTime(env, updated.remind_at));
   }
+  if (cmd === '/plan') { await sendBrief(env, chatId); return; }
   const body = cmd === '/add' ? arg : cmd.startsWith('/') ? '' : text;
   if (!body) return reply(HELP);
-  const parsed = parseQuickAdd(body, env.TZ || 'Asia/Riyadh');
+  let parsed = await aiParse(env, body);
+  if (!parsed) {
+    const q = parseQuickAdd(body, env.TZ || 'Asia/Riyadh');
+    parsed = { title: q.title, remind_at: q.remind_at, repeat: 'none', lead_min: 0, details: '' };
+  }
   if (!parsed.title) return reply('What should I remind you about?');
-  const task = await createTask(env, { title: parsed.title, remind_at: parsed.remind_at });
-  return reply('➕ Added <b>#' + task.id + '</b> ' + esc(task.title) + (task.remind_at ? '\n⏰ ' + fmtTime(env, task.remind_at) : ''));
+  const task = await createTask(env, parsed);
+  let s = '➕ Added <b>#' + task.id + '</b> ' + esc(task.title);
+  if (task.remind_at) s += '\n⏰ ' + fmtTime(env, task.remind_at);
+  if (task.lead_min) s += '\n🔔 ' + untilText(task.lead_min * 60000) + ' before';
+  if (task.repeat !== 'none') s += '\n↻ Every ' + (task.repeat === 'daily' ? 'day' : 'week');
+  if (task.details) s += '\n<i>' + esc(task.details) + '</i>';
+  return tg(env, 'sendMessage', {
+    chat_id: chatId, text: s, parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: [[{ text: '↩️ Undo', callback_data: 'undo:' + task.id }]] },
+  });
+}
+
+// ---------------------------------------------------------------- AI (Cloudflare Workers AI)
+const AI_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+
+function localNow(env, ts = Date.now()) {
+  const tz = env.TZ || 'Asia/Riyadh';
+  const p = zonedParts(ts, tz);
+  const pad = (n) => String(n).padStart(2, '0');
+  return { ...p, date: p.year + '-' + pad(p.month) + '-' + pad(p.day), hm: pad(p.hour) + ':' + pad(p.minute) };
+}
+
+async function runAI(env, messages, maxTokens, schema) {
+  if (!env.AI) return null;
+  const opts = { messages, max_tokens: maxTokens, temperature: 0.1 };
+  let out;
+  try {
+    out = await env.AI.run(AI_MODEL, schema ? { ...opts, response_format: { type: 'json_schema', json_schema: schema } } : opts);
+  } catch (e) {
+    if (!schema) throw e;
+    out = await env.AI.run(AI_MODEL, opts); // retry without JSON mode
+  }
+  const r = out && out.response;
+  return typeof r === 'string' ? r : r != null ? JSON.stringify(r) : null;
+}
+
+const PARSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    details: { type: 'string' },
+    date: { type: 'string' },
+    time: { type: 'string' },
+    repeat: { type: 'string', enum: ['none', 'daily', 'weekly'] },
+    early_minutes: { type: 'integer' },
+  },
+  required: ['title', 'date', 'time', 'repeat', 'early_minutes'],
+};
+
+// Turns "submit stats Thursday 10pm remind me an hour before" into task fields. Returns null if AI is unavailable.
+async function aiParse(env, text) {
+  if (!env.AI) return null;
+  const tz = env.TZ || 'Asia/Riyadh', now = Date.now(), n = localNow(env, now);
+  const days = [];
+  for (let i = 0; i < 8; i++) {
+    const d = localNow(env, now + i * DAY);
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(new Date(now + i * DAY));
+    days.push(wd + ' = ' + d.date + (i === 0 ? ' (today)' : i === 1 ? ' (tomorrow)' : ''));
+  }
+  const system = [
+    'You turn a quick note into a reminder. The note may be English, Arabic, or mixed.',
+    'Now: ' + n.date + ' ' + n.hm + ' (24h, local time). The week starts on Sunday.',
+    'Upcoming dates: ' + days.join('; ') + '.',
+    'Return JSON only, with these fields:',
+    '- title: the task itself, short, in the same language as the note, with all time/date/repeat/early-reminder words removed. Capitalise the first letter.',
+    '- details: any extra context that is not part of the title, or "".',
+    '- date: YYYY-MM-DD, or "" if no day is mentioned.',
+    '- time: HH:MM in 24h, or "" if no time is mentioned. "morning"=09:00, "noon"=12:00, "afternoon"=15:00, "evening"=19:00, "tonight"=21:00. "in 2 hours" means now plus 2 hours (set the date too).',
+    '- repeat: "daily" for every day, "weekly" for every week or every <weekday>, otherwise "none".',
+    '- early_minutes: if the note asks for an earlier heads-up ("remind me 30 min before", "a day before"), the minutes (10, 30, 60 or 1440), otherwise 0.',
+    'A weekday name means the next upcoming one (today counts only if the time is still ahead). Never invent dates the note does not imply.',
+  ].join('\n');
+  let raw;
+  try {
+    raw = await runAI(env, [{ role: 'system', content: system }, { role: 'user', content: text }], 220, PARSE_SCHEMA);
+  } catch (e) { console.error('AI parse failed', e); return null; }
+  if (!raw) return null;
+  let o;
+  try { o = JSON.parse(raw); } catch (_) {
+    const m = raw.match(/\{[\s\S]*\}/); if (!m) return null;
+    try { o = JSON.parse(m[0]); } catch (_) { return null; }
+  }
+  const title = String(o.title || '').trim().slice(0, 300) || text.slice(0, 300);
+  let date = /^\d{4}-\d{2}-\d{2}$/.test(o.date || '') ? o.date : '';
+  const time = /^([01]?\d|2[0-3]):[0-5]\d$/.test(o.time || '') ? o.time.padStart(5, '0') : '';
+  let remind_at = null;
+  if (date || time) {
+    const [hh, mm] = (time || '09:00').split(':').map(Number);
+    const [y, mo, d] = (date || n.date).split('-').map(Number);
+    remind_at = zonedToUtc(y, mo, d, hh, mm, tz);
+    if (!date && remind_at <= now) remind_at += DAY; // a time with no day = the next time it comes round
+  }
+  const repeat = REPEATS.includes(o.repeat) ? o.repeat : 'none';
+  const em = Number(o.early_minutes) || 0;
+  const lead_min = em <= 0 || remind_at == null ? 0 : LEADS.slice(1).reduce((a, b) => (Math.abs(b - em) < Math.abs(a - em) ? b : a));
+  return { title, details: String(o.details || '').trim().slice(0, 2000), remind_at, repeat, lead_min };
+}
+
+// ---------------------------------------------------------------- morning plan
+async function briefSettings(env) {
+  return {
+    enabled: (await getSetting(env, 'brief_enabled')) !== '0',
+    time: (await getSetting(env, 'brief_time')) || '11:00',
+    connected: !!(await getSetting(env, 'chat_id')),
+    ai: !!env.AI,
+  };
+}
+
+async function maybeSendBrief(env) {
+  const s = await briefSettings(env);
+  if (!s.enabled || !s.connected || !env.TELEGRAM_TOKEN) return;
+  const n = localNow(env);
+  const mins = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
+  const late = mins(n.hm) - mins(s.time);
+  if (late < 0 || late > 180) return; // only within 3 hours after the chosen time (no surprise plan at night)
+  if ((await getSetting(env, 'brief_last')) === n.date) return;
+  await setSetting(env, 'brief_last', n.date); // mark first so it never sends twice
+  await sendBrief(env, await getSetting(env, 'chat_id'));
+}
+
+async function sendBrief(env, chat) {
+  const tz = env.TZ || 'Asia/Riyadh', now = Date.now(), n = localNow(env, now);
+  const dayStart = zonedToUtc(n.year, n.month, n.day, 0, 0, tz), dayEnd = dayStart + DAY;
+  const all = await listTasks(env);
+  const open = all.filter((t) => !t.done);
+  const overdue = open.filter((t) => t.remind_at != null && t.remind_at < now);
+  const today = open.filter((t) => t.remind_at != null && t.remind_at >= now && t.remind_at < dayEnd);
+  const doneToday = all.filter((t) => t.done && t.remind_at != null && t.remind_at >= dayStart && t.remind_at < dayEnd);
+  const tomorrow = open.filter((t) => t.remind_at != null && t.remind_at >= dayEnd && t.remind_at < dayEnd + DAY);
+
+  const line = (t) => '• ' + fmtClock(env, t.remind_at) + '  ' + esc(t.title);
+  const dateLabel = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(now));
+  let s = '☀️ <b>Your plan for ' + dateLabel + '</b>\n';
+  if (today.length) s += '\n<b>Today</b>\n' + today.map(line).join('\n') + '\n';
+  if (doneToday.length) s += '\n<i>Already done: ' + doneToday.map((t) => esc(t.title)).join(', ') + '</i>\n';
+  if (overdue.length) s += '\n<b>Overdue</b>\n' + overdue.slice(0, 10).map((t) => '• ' + esc(t.title) + '  <i>(' + fmtTime(env, t.remind_at) + ')</i>').join('\n') + '\n';
+  if (!today.length && !overdue.length) s += '\nNothing scheduled for the rest of today. 🎉\n';
+  if (tomorrow.length) s += '\n<i>Tomorrow: ' + tomorrow.length + ' task' + (tomorrow.length > 1 ? 's' : '') + '</i>\n';
+
+  // a short, friendly suggestion from the AI (skipped quietly if AI is unavailable)
+  if (today.length || overdue.length) {
+    try {
+      const facts = 'Now ' + n.hm + '. Today: ' + (today.map((t) => fmtClock(env, t.remind_at) + ' ' + t.title + (t.details ? ' (' + t.details.slice(0, 80) + ')' : '')).join('; ') || 'none') +
+        '. Overdue: ' + (overdue.map((t) => t.title).join('; ') || 'none') + '. Tomorrow: ' + (tomorrow.map((t) => t.title).join('; ') || 'none') + '.';
+      const tip = await runAI(env, [
+        { role: 'system', content: 'You are a friendly, brief planning assistant for a busy person. In English, write 1 or 2 short sentences: which task to tackle first and why, plus a light encouraging touch. Only mention tasks from the list. No greeting, no lists, no emojis, no markdown.' },
+        { role: 'user', content: facts },
+      ], 120);
+      if (tip && tip.trim()) s += '\n💡 ' + esc(tip.trim().replace(/^["']|["']$/g, '')) + '\n';
+    } catch (e) { console.error('AI tip failed', e); }
+  }
+  return tg(env, 'sendMessage', { chat_id: chat, text: s.trim(), parse_mode: 'HTML' });
 }
 
 // "Call mom at 18:30" | "report tomorrow 9am" | "oven in 20m"
@@ -497,7 +697,7 @@ function manifest() {
   return json({
     name: 'Reminders', short_name: 'Reminders', start_url: '/', display: 'standalone',
     background_color: '#111315', theme_color: '#111315',
-    icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }],
+    icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml' }, { src: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   });
 }
 function icon() {
@@ -505,4 +705,12 @@ function icon() {
     '<path d="M256 112c-62 0-104 46-104 106v62l-34 52h276l-34-52v-62c0-60-42-106-104-106z" fill="#fff"/>' +
     '<circle cx="256" cy="376" r="36" fill="#fff"/></svg>';
   return new Response(svg, { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' } });
+}
+
+// 180x180 PNG for the iPhone home-screen icon (iOS ignores SVG icons)
+const TOUCH_ICON_B64 = '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';
+function touchIcon() {
+  const bin = atob(TOUCH_ICON_B64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Response(bytes, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
 }

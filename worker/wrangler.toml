@@ -16,6 +16,10 @@ type = "Text"
 globs = ["**/*.html"]
 fallthrough = true
 
+# Cloudflare Workers AI (free daily allowance) for "type naturally" and the morning plan
+[ai]
+binding = "AI"
+
 # The database is created automatically (Deploy button or setup.cmd)
 [[d1_databases]]
 binding = "DB"
