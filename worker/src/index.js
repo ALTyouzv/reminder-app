@@ -512,21 +512,30 @@ async function runAI(env, messages, maxTokens, schema) {
   return typeof r === 'string' ? r : r != null ? JSON.stringify(r) : null;
 }
 
-const TASK_SCHEMA = {
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const PARSE_SCHEMA = {
   type: 'object',
   properties: {
     title: { type: 'string' },
     details: { type: 'string' },
     date: { type: 'string' },
-    weekday: { type: 'string', enum: ['', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] },
     time: { type: 'string' },
+    weekdays: { type: 'array', items: { type: 'string', enum: WEEKDAYS } },
+    day_titles: { type: 'array', items: { type: 'string' } },
     repeat: { type: 'string', enum: ['none', 'daily', 'weekly'] },
     early_minutes: { type: 'integer' },
   },
-  required: ['title', 'date', 'weekday', 'time', 'repeat', 'early_minutes'],
+  required: ['title', 'date', 'time', 'weekdays', 'day_titles', 'repeat', 'early_minutes'],
 };
-const PARSE_SCHEMA = { type: 'object', properties: { tasks: { type: 'array', items: TASK_SCHEMA } }, required: ['tasks'] };
-const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// Weekday names written in the note (English or Arabic), in order, without repeats.
+const WD_PATTERNS = [
+  [0, /\bsun(day)?\b|الأحد|الاحد/i], [1, /\bmon(day)?\b|الإثنين|الاثنين/i], [2, /\btue(s|sday)?\b|الثلاثاء|الثلاثا/i],
+  [3, /\bwed(s|nesday)?\b|الأربعاء|الاربعاء/i], [4, /\bthu(r|rs|rsday)?\b|الخميس/i], [5, /\bfri(day)?\b|الجمعة|الجمعه/i], [6, /\bsat(urday)?\b|السبت/i],
+];
+function weekdaysInText(text) {
+  return WD_PATTERNS.filter(([, re]) => re.test(text)).map(([i]) => i);
+}
 
 // First task only (kept for simple callers).
 async function aiParse(env, text) {
@@ -534,7 +543,7 @@ async function aiParse(env, text) {
   return all && all.length ? all[0] : null;
 }
 
-// Turns a note into one or more tasks, e.g. "gym 7:30 sun push, mon pull, tue legs" -> 3 weekly tasks.
+// Turns a note into one or more tasks. "gym 7pm sun push, mon pull, tue legs" -> 3 weekly tasks, one per day.
 // Returns null if AI is unavailable or the answer can't be read.
 async function aiParseAll(env, text) {
   if (!env.AI) return null;
@@ -546,25 +555,23 @@ async function aiParseAll(env, text) {
     days.push(wd + ' = ' + d.date + (i === 0 ? ' (today)' : i === 1 ? ' (tomorrow)' : ''));
   }
   const system = [
-    'You turn a quick note into reminders. The note may be English, Arabic, or mixed.',
+    'You turn a quick note into a reminder. The note may be English, Arabic, or mixed.',
     'Now: ' + n.date + ' ' + n.hm + ' (24h, local time). The week starts on Sunday.',
     'Upcoming dates: ' + days.join('; ') + '.',
-    'Return JSON only: {"tasks": [ ... ]}. Usually there is ONE task. Return SEVERAL tasks when the note lists different days, times or names,',
-    'e.g. "gym 7:30 on sun and mon, name sun push and mon pull" = two tasks: "Gym: push day" on sunday and "Gym: pull" on monday.',
-    'Something on several weekdays every week = one weekly task PER weekday. Maximum 10 tasks.',
-    'Each task has these fields:',
-    '- title: the task itself, short, in the same language as the note, with all time/date/repeat/early-reminder words removed. If the note gives a shared name plus a per-day name, combine them like "Gym: push day". Capitalise the first letter.',
+    'Return one JSON object with these fields:',
+    '- title: the task itself, short, in the same language as the note, with all time/date/repeat/early-reminder words removed. Capitalise the first letter.',
     '- details: any extra context that is not part of the title, or "".',
-    '- weekday: if the task is tied to a weekday (sunday..saturday), that weekday in lowercase English, otherwise "".',
-    '- date: YYYY-MM-DD if a specific date or "today"/"tomorrow" is meant, otherwise "".',
-    '- time: HH:MM in 24h, or "" if no time is mentioned. "7 and half" = 07:30. "morning"=09:00, "noon"=12:00, "afternoon"=15:00, "evening"=19:00, "tonight"=21:00. pm/مساء adds 12 hours. "in 2 hours" means now plus 2 hours (set the date too).',
-    '- repeat: "daily" for every day, "weekly" for every week, every <weekday>, or a weekly routine (like a gym split), otherwise "none".',
+    '- weekdays: EVERY weekday the note mentions for this task, in lowercase English (e.g. ["sunday","monday","tuesday","thursday","friday"]), or [] if none.',
+    '- day_titles: if the note gives a different name for each of those weekdays, the names in the SAME order as weekdays (e.g. ["Push day","Pull","Legs","Upper","Lower"]); otherwise [].',
+    '- date: YYYY-MM-DD only for a specific date, "today" or "tomorrow"; otherwise "".',
+    '- time: HH:MM in 24h, or "" if no time is mentioned. "7 and half" = 07:30, "7:30 pm" = 19:30. "morning"=09:00, "noon"=12:00, "afternoon"=15:00, "evening"=19:00, "tonight"=21:00. "in 2 hours" means now plus 2 hours (set the date too).',
+    '- repeat: "daily" for every day, "weekly" for every week, every <weekday>, or a routine on several weekdays; otherwise "none".',
     '- early_minutes: if the note asks for an earlier heads-up ("remind me 30 min before", "a day before"), the minutes (10, 30, 60 or 1440), otherwise 0.',
     'Never invent days or times the note does not imply.',
   ].join('\n');
   let raw;
   try {
-    raw = await runAI(env, [{ role: 'system', content: system }, { role: 'user', content: text }], 1200, PARSE_SCHEMA);
+    raw = await runAI(env, [{ role: 'system', content: system }, { role: 'user', content: text }], 500, PARSE_SCHEMA);
   } catch (e) { console.error('AI parse failed', e); return null; }
   if (!raw) return null;
   let o;
@@ -572,26 +579,53 @@ async function aiParseAll(env, text) {
     const m = raw.match(/[\[{][\s\S]*[\]}]/); if (!m) return null;
     try { o = JSON.parse(m[0]); } catch (_) { return null; }
   }
-  const list = Array.isArray(o) ? o : Array.isArray(o && o.tasks) ? o.tasks : o && o.title ? [o] : [];
-  const out = list.slice(0, 10).map((t) => cleanAiTask(env, t, text, now, n)).filter(Boolean);
+  const list = Array.isArray(o) ? o : Array.isArray(o && o.tasks) ? o.tasks : o && typeof o === 'object' ? [o] : [];
+  const out = [];
+  for (const t of list) {
+    for (const x of expandAiTask(env, t, text, now, n)) if (out.length < 10) out.push(x);
+  }
   return out.length ? out : null;
 }
 
-function cleanAiTask(env, o, text, now, n) {
-  if (!o || typeof o !== 'object') return null;
+// One AI answer -> one task, or one weekly task per weekday when several weekdays are given.
+function expandAiTask(env, o, text, now, n) {
+  if (!o || typeof o !== 'object') return [];
+  let wds = (Array.isArray(o.weekdays) ? o.weekdays : [o.weekday]).map((w) => WEEKDAYS.indexOf(String(w || '').toLowerCase())).filter((i) => i >= 0);
+  wds = [...new Set(wds)];
+  if (wds.length < 2) {
+    // backup: the AI missed the days, but the note clearly names several weekdays
+    const found = weekdaysInText(text);
+    if (found.length >= 2) wds = found;
+  }
+  const base = cleanTitle(o.title) || text.slice(0, 300);
+  if (wds.length < 2 && !(wds.length === 1 && !/^\d{4}-/.test(o.date || ''))) return [cleanAiTask(env, o, base, -1, now, n)].filter(Boolean);
+  const names = Array.isArray(o.day_titles) ? o.day_titles.map(cleanTitle) : [];
+  const repeat = wds.length >= 2 ? 'weekly' : o.repeat;
+  return wds.map((wd, i) => {
+    const dn = names.length === wds.length ? names[i] : '';
+    const title = !dn || dn.toLowerCase() === base.toLowerCase() ? base
+      : dn.toLowerCase().startsWith(base.toLowerCase()) ? dn : base + ': ' + dn;
+    return cleanAiTask(env, { ...o, repeat, date: '' }, title.slice(0, 300), wd, now, n);
+  }).filter(Boolean);
+}
+
+function cleanTitle(s) {
+  s = String(s || '').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+}
+
+function cleanAiTask(env, o, title, wd, now, n) {
   const tz = env.TZ || 'Asia/Riyadh';
-  const title = String(o.title || '').trim().slice(0, 300) || text.slice(0, 300);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(o.date || '') ? o.date : '';
   const time = /^([01]?\d|2[0-3]):[0-5]\d$/.test(o.time || '') ? o.time.padStart(5, '0') : '';
-  const wd = WEEKDAYS.indexOf(String(o.weekday || '').toLowerCase());
   let repeat = REPEATS.includes(o.repeat) ? o.repeat : 'none';
   let remind_at = null;
   const [hh, mm] = (time || '09:00').split(':').map(Number);
-  if (wd >= 0 && !date) {
+  if (wd >= 0) {
     // next time that weekday + time comes round (today counts if the time is still ahead)
     const today = zonedParts(now, tz);
     const todayWd = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
-    let add = (wd - todayWd + 7) % 7;
+    const add = (wd - todayWd + 7) % 7;
     let p = zonedParts(now + add * DAY, tz);
     remind_at = zonedToUtc(p.year, p.month, p.day, hh, mm, tz);
     if (remind_at <= now) { p = zonedParts(now + (add + 7) * DAY, tz); remind_at = zonedToUtc(p.year, p.month, p.day, hh, mm, tz); }
