@@ -80,6 +80,7 @@ Open your app address in Safari, tap **Share**, then **Add to Home Screen**. It 
 |---|---|
 | `Submit report Thursday 10pm, remind me an hour before` | Adds it for Thursday 22:00 with a 1-hour heads-up |
 | `Gym every Sunday at 6pm` | Weekly reminder |
+| `Gym 7:30 sun push, mon pull, tue legs` | Adds 3 weekly tasks, one per day, with their own names |
 | `Check oven in 20m` | Reminder in 20 minutes |
 | `Buy milk` | Adds it with no reminder |
 | `/plan` | Today's plan right now |

@@ -146,6 +146,9 @@ a { color: var(--accent); }
 
 /* AI + morning plan */
 .ai-note { font-size: 13.5px; color: var(--accent); background: var(--accent-soft); border-radius: 10px; padding: 8px 11px; }
+.ai-multi { margin: 6px 0 0; padding-left: 18px; color: var(--text); }
+.ai-multi li { margin: 4px 0; }
+.ai-multi span { color: var(--muted); font-size: 13px; }
 .ai-note.warn { color: var(--warn); background: var(--warn-soft); }
 .btn.busy { opacity: .75; pointer-events: none; }
 .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); cursor: pointer; }
@@ -674,7 +677,7 @@ a { color: var(--accent); }
   });
   // "type naturally": the first press of Add lets the AI fill in the fields, the second press saves
   var aiDone = false;
-  function hideAiNote() { aiDone = false; $('aiNote').classList.add('hidden'); }
+  function hideAiNote() { aiDone = false; multi = null; $('aiNote').classList.add('hidden'); hideMultiFields(false); }
   function aiSummary(p) {
     var bits = [];
     if (p.remind_at != null) bits.push(when(p.remind_at));
@@ -682,7 +685,7 @@ a { color: var(--accent); }
     if (p.lead_min) bits.push(leadShort(p.lead_min) + ' early heads-up');
     return bits.join(' · ');
   }
-  $('newTitle').addEventListener('input', function () { if (!$('newTitle').value.trim()) hideAiNote(); });
+  $('newTitle').addEventListener('input', function () { if (!$('newTitle').value.trim() || multi) hideAiNote(); });
   $('composer').addEventListener('submit', function (e) {
     e.preventDefault();
     var title = $('newTitle').value.trim();
@@ -692,6 +695,7 @@ a { color: var(--accent); }
     var btn = $('addBtn'); btn.classList.add('busy'); btn.textContent = 'Thinking…';
     api('POST', '/api/parse', { text: title }).then(function (d) {
       var p = d.parsed || {};
+      if (d.tasks && d.tasks.length > 1) return showMulti(d.tasks);
       var nothing = p.remind_at == null && p.repeat === 'none' && !p.lead_min && !p.details && (p.title || '').trim() === title;
       if (nothing) return doAdd();
       $('newTitle').value = p.title || title;
@@ -708,7 +712,30 @@ a { color: var(--accent); }
       aiDone = true; $('newTitle').focus();
     }).catch(function () { doAdd(); }).then(function () { btn.classList.remove('busy'); btn.textContent = 'Add'; });
   });
+  // several tasks found in one note: list them, and Add saves them all
+  var multi = null;
+  function showMulti(list) {
+    multi = list; aiDone = true;
+    $('newMore').classList.remove('hidden'); hideMultiFields(true);
+    var note = $('aiNote'); note.className = 'ai-note';
+    note.innerHTML = '\u2728 Found <b>' + list.length + ' tasks</b>. Press Add to save them all.' +
+      '<ul class="ai-multi">' + list.map(function (t) {
+        var sum = aiSummary(t);
+        return '<li dir="auto"><b>' + esc(t.title) + '</b>' + (sum ? '<br><span>' + esc(sum) + '</span>' : '') + '</li>';
+      }).join('') + '</ul>';
+    $('newTitle').focus();
+  }
+  function hideMultiFields(on) { Array.prototype.forEach.call(document.querySelectorAll('#newMore > :not(#aiNote)'), function (el) { el.classList.toggle('hidden', on); }); }
   function doAdd() {
+    if (multi) {
+      var list = multi; $('addBtn').disabled = true;
+      api('POST', '/api/tasks/bulk', { tasks: list }).then(function (d) {
+        d.tasks.forEach(replaceTask);
+        multi = null; $('newTitle').value = ''; hideAiNote(); render();
+        toast('Added ' + d.tasks.length + ' tasks');
+      }).catch(function (e) { toast(e.message); }).then(function () { $('addBtn').disabled = false; });
+      return;
+    }
     var title = $('newTitle').value.trim();
     if (!title) return;
     var body ={ title: title, details: $('newDetails').value.trim(), remind_at: fromLocalInput($('newWhen').value), repeat: $('newRepeat').value, lead_min: Number($('newLead').value) };

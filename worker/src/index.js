@@ -87,6 +87,14 @@ async function route(request, env, ctx) {
     const task = await createTask(env, body);
     return json({ task }, 201);
   }
+  if (path === '/api/tasks/bulk' && method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const list = (Array.isArray(body.tasks) ? body.tasks : []).slice(0, 10).filter((t) => String(t.title || '').trim());
+    if (!list.length) return json({ error: 'Nothing to add' }, 400);
+    const tasks = [];
+    for (const t of list) tasks.push(await createTask(env, t));
+    return json({ tasks }, 201);
+  }
   const m = path.match(/^\/api\/tasks\/(\d+)$/);
   if (m) {
     const id = Number(m[1]);
@@ -106,8 +114,8 @@ async function route(request, env, ctx) {
     const body = await request.json().catch(() => ({}));
     const text = String(body.text || '').trim().slice(0, 500);
     if (!text) return json({ error: 'Type something first' }, 400);
-    const ai = await aiParse(env, text);
-    if (ai) return json({ ai: true, parsed: ai });
+    const all = await aiParseAll(env, text);
+    if (all) return json({ ai: true, parsed: all[0], tasks: all });
     const q = parseQuickAdd(text, env.TZ || 'Asia/Riyadh');
     return json({ ai: false, parsed: { title: q.title || text, details: '', remind_at: q.remind_at, repeat: 'none', lead_min: 0 } });
   }
@@ -378,15 +386,20 @@ async function handleTelegram(update, env) {
     const chatId = String(q.message?.chat?.id || '');
     if (!owner || chatId !== owner) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id });
     const [action, idStr, minStr] = String(q.data || '').split(':');
-    const id = Number(idStr);
+    const id = Number(idStr) || 0;
     const task = await getTask(env, id);
     let note = 'Task not found';
     if (action === 'undo') {
-      if (task) await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();
-      await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: task ? 'Removed' : 'Already gone' });
+      const ids = String(idStr || '').split(',').map(Number).filter(Boolean).slice(0, 10);
+      const gone = [];
+      for (const i of ids) {
+        const t = await getTask(env, i);
+        if (t) { await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(i).run(); gone.push(t.title); }
+      }
+      await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: gone.length ? 'Removed' : 'Already gone' });
       await tg(env, 'editMessageText', {
         chat_id: chatId, message_id: q.message.message_id, parse_mode: 'HTML',
-        text: '↩️ <s>' + esc(task ? task.title : 'Task') + '</s>\n<i>Removed</i>',
+        text: '↩️ ' + (gone.length ? gone.map((t) => '<s>' + esc(t) + '</s>').join('\n') : 'Task') + '\n<i>Removed</i>',
       }).catch(() => {});
       return;
     }
@@ -449,21 +462,29 @@ async function handleTelegram(update, env) {
   if (cmd === '/plan') { await sendBrief(env, chatId); return; }
   const body = cmd === '/add' ? arg : cmd.startsWith('/') ? '' : text;
   if (!body) return reply(HELP);
-  let parsed = await aiParse(env, body);
-  if (!parsed) {
+  let list = await aiParseAll(env, body);
+  if (!list) {
     const q = parseQuickAdd(body, env.TZ || 'Asia/Riyadh');
-    parsed = { title: q.title, remind_at: q.remind_at, repeat: 'none', lead_min: 0, details: '' };
+    list = [{ title: q.title, remind_at: q.remind_at, repeat: 'none', lead_min: 0, details: '' }];
   }
-  if (!parsed.title) return reply('What should I remind you about?');
-  const task = await createTask(env, parsed);
-  let s = '➕ Added <b>#' + task.id + '</b> ' + esc(task.title);
-  if (task.remind_at) s += '\n⏰ ' + fmtTime(env, task.remind_at);
-  if (task.lead_min) s += '\n🔔 ' + untilText(task.lead_min * 60000) + ' before';
-  if (task.repeat !== 'none') s += '\n↻ Every ' + (task.repeat === 'daily' ? 'day' : 'week');
-  if (task.details) s += '\n<i>' + esc(task.details) + '</i>';
+  list = list.filter((t) => t.title);
+  if (!list.length) return reply('What should I remind you about?');
+  const made = [];
+  for (const t of list) made.push(await createTask(env, t));
+  const describe = (task) => {
+    let s = '';
+    if (task.remind_at) s += '\n⏰ ' + fmtTime(env, task.remind_at);
+    if (task.lead_min) s += '\n🔔 ' + untilText(task.lead_min * 60000) + ' before';
+    if (task.repeat !== 'none') s += '\n↻ Every ' + (task.repeat === 'daily' ? 'day' : 'week');
+    if (task.details) s += '\n<i>' + esc(task.details) + '</i>';
+    return s;
+  };
+  let s;
+  if (made.length === 1) s = '➕ Added <b>#' + made[0].id + '</b> ' + esc(made[0].title) + describe(made[0]);
+  else s = '➕ Added <b>' + made.length + ' tasks</b>\n\n' + made.map((t) => '<b>#' + t.id + '</b> ' + esc(t.title) + describe(t)).join('\n\n');
   return tg(env, 'sendMessage', {
     chat_id: chatId, text: s, parse_mode: 'HTML',
-    reply_markup: { inline_keyboard: [[{ text: '↩️ Undo', callback_data: 'undo:' + task.id }]] },
+    reply_markup: { inline_keyboard: [[{ text: made.length > 1 ? '↩️ Undo all' : '↩️ Undo', callback_data: 'undo:' + made.map((t) => t.id).join(',') }]] },
   });
 }
 
@@ -491,21 +512,31 @@ async function runAI(env, messages, maxTokens, schema) {
   return typeof r === 'string' ? r : r != null ? JSON.stringify(r) : null;
 }
 
-const PARSE_SCHEMA = {
+const TASK_SCHEMA = {
   type: 'object',
   properties: {
     title: { type: 'string' },
     details: { type: 'string' },
     date: { type: 'string' },
+    weekday: { type: 'string', enum: ['', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] },
     time: { type: 'string' },
     repeat: { type: 'string', enum: ['none', 'daily', 'weekly'] },
     early_minutes: { type: 'integer' },
   },
-  required: ['title', 'date', 'time', 'repeat', 'early_minutes'],
+  required: ['title', 'date', 'weekday', 'time', 'repeat', 'early_minutes'],
 };
+const PARSE_SCHEMA = { type: 'object', properties: { tasks: { type: 'array', items: TASK_SCHEMA } }, required: ['tasks'] };
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
-// Turns "submit stats Thursday 10pm remind me an hour before" into task fields. Returns null if AI is unavailable.
+// First task only (kept for simple callers).
 async function aiParse(env, text) {
+  const all = await aiParseAll(env, text);
+  return all && all.length ? all[0] : null;
+}
+
+// Turns a note into one or more tasks, e.g. "gym 7:30 sun push, mon pull, tue legs" -> 3 weekly tasks.
+// Returns null if AI is unavailable or the answer can't be read.
+async function aiParseAll(env, text) {
   if (!env.AI) return null;
   const tz = env.TZ || 'Asia/Riyadh', now = Date.now(), n = localNow(env, now);
   const days = [];
@@ -515,39 +546,61 @@ async function aiParse(env, text) {
     days.push(wd + ' = ' + d.date + (i === 0 ? ' (today)' : i === 1 ? ' (tomorrow)' : ''));
   }
   const system = [
-    'You turn a quick note into a reminder. The note may be English, Arabic, or mixed.',
+    'You turn a quick note into reminders. The note may be English, Arabic, or mixed.',
     'Now: ' + n.date + ' ' + n.hm + ' (24h, local time). The week starts on Sunday.',
     'Upcoming dates: ' + days.join('; ') + '.',
-    'Return JSON only, with these fields:',
-    '- title: the task itself, short, in the same language as the note, with all time/date/repeat/early-reminder words removed. Capitalise the first letter.',
+    'Return JSON only: {"tasks": [ ... ]}. Usually there is ONE task. Return SEVERAL tasks when the note lists different days, times or names,',
+    'e.g. "gym 7:30 on sun and mon, name sun push and mon pull" = two tasks: "Gym: push day" on sunday and "Gym: pull" on monday.',
+    'Something on several weekdays every week = one weekly task PER weekday. Maximum 10 tasks.',
+    'Each task has these fields:',
+    '- title: the task itself, short, in the same language as the note, with all time/date/repeat/early-reminder words removed. If the note gives a shared name plus a per-day name, combine them like "Gym: push day". Capitalise the first letter.',
     '- details: any extra context that is not part of the title, or "".',
-    '- date: YYYY-MM-DD, or "" if no day is mentioned.',
-    '- time: HH:MM in 24h, or "" if no time is mentioned. "morning"=09:00, "noon"=12:00, "afternoon"=15:00, "evening"=19:00, "tonight"=21:00. "in 2 hours" means now plus 2 hours (set the date too).',
-    '- repeat: "daily" for every day, "weekly" for every week or every <weekday>, otherwise "none".',
+    '- weekday: if the task is tied to a weekday (sunday..saturday), that weekday in lowercase English, otherwise "".',
+    '- date: YYYY-MM-DD if a specific date or "today"/"tomorrow" is meant, otherwise "".',
+    '- time: HH:MM in 24h, or "" if no time is mentioned. "7 and half" = 07:30. "morning"=09:00, "noon"=12:00, "afternoon"=15:00, "evening"=19:00, "tonight"=21:00. pm/مساء adds 12 hours. "in 2 hours" means now plus 2 hours (set the date too).',
+    '- repeat: "daily" for every day, "weekly" for every week, every <weekday>, or a weekly routine (like a gym split), otherwise "none".',
     '- early_minutes: if the note asks for an earlier heads-up ("remind me 30 min before", "a day before"), the minutes (10, 30, 60 or 1440), otherwise 0.',
-    'A weekday name means the next upcoming one (today counts only if the time is still ahead). Never invent dates the note does not imply.',
+    'Never invent days or times the note does not imply.',
   ].join('\n');
   let raw;
   try {
-    raw = await runAI(env, [{ role: 'system', content: system }, { role: 'user', content: text }], 220, PARSE_SCHEMA);
+    raw = await runAI(env, [{ role: 'system', content: system }, { role: 'user', content: text }], 1200, PARSE_SCHEMA);
   } catch (e) { console.error('AI parse failed', e); return null; }
   if (!raw) return null;
   let o;
   try { o = JSON.parse(raw); } catch (_) {
-    const m = raw.match(/\{[\s\S]*\}/); if (!m) return null;
+    const m = raw.match(/[\[{][\s\S]*[\]}]/); if (!m) return null;
     try { o = JSON.parse(m[0]); } catch (_) { return null; }
   }
+  const list = Array.isArray(o) ? o : Array.isArray(o && o.tasks) ? o.tasks : o && o.title ? [o] : [];
+  const out = list.slice(0, 10).map((t) => cleanAiTask(env, t, text, now, n)).filter(Boolean);
+  return out.length ? out : null;
+}
+
+function cleanAiTask(env, o, text, now, n) {
+  if (!o || typeof o !== 'object') return null;
+  const tz = env.TZ || 'Asia/Riyadh';
   const title = String(o.title || '').trim().slice(0, 300) || text.slice(0, 300);
-  let date = /^\d{4}-\d{2}-\d{2}$/.test(o.date || '') ? o.date : '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(o.date || '') ? o.date : '';
   const time = /^([01]?\d|2[0-3]):[0-5]\d$/.test(o.time || '') ? o.time.padStart(5, '0') : '';
+  const wd = WEEKDAYS.indexOf(String(o.weekday || '').toLowerCase());
+  let repeat = REPEATS.includes(o.repeat) ? o.repeat : 'none';
   let remind_at = null;
-  if (date || time) {
-    const [hh, mm] = (time || '09:00').split(':').map(Number);
+  const [hh, mm] = (time || '09:00').split(':').map(Number);
+  if (wd >= 0 && !date) {
+    // next time that weekday + time comes round (today counts if the time is still ahead)
+    const today = zonedParts(now, tz);
+    const todayWd = new Date(Date.UTC(today.year, today.month - 1, today.day)).getUTCDay();
+    let add = (wd - todayWd + 7) % 7;
+    let p = zonedParts(now + add * DAY, tz);
+    remind_at = zonedToUtc(p.year, p.month, p.day, hh, mm, tz);
+    if (remind_at <= now) { p = zonedParts(now + (add + 7) * DAY, tz); remind_at = zonedToUtc(p.year, p.month, p.day, hh, mm, tz); }
+  } else if (date || time) {
     const [y, mo, d] = (date || n.date).split('-').map(Number);
     remind_at = zonedToUtc(y, mo, d, hh, mm, tz);
     if (!date && remind_at <= now) remind_at += DAY; // a time with no day = the next time it comes round
   }
-  const repeat = REPEATS.includes(o.repeat) ? o.repeat : 'none';
+  if (remind_at == null) repeat = 'none';
   const em = Number(o.early_minutes) || 0;
   const lead_min = em <= 0 || remind_at == null ? 0 : LEADS.slice(1).reduce((a, b) => (Math.abs(b - em) < Math.abs(a - em) ? b : a));
   return { title, details: String(o.details || '').trim().slice(0, 2000), remind_at, repeat, lead_min };
