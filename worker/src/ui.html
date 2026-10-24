@@ -879,7 +879,7 @@ a { color: var(--accent); }
   $('proofPick').addEventListener('click', function () { $('proofFile').click(); });
   $('proofFile').addEventListener('change', function () {
     var f = $('proofFile').files[0]; if (!f || !proofTask) return;
-    shrinkImage(f, 1024).then(function (dataUrl) {
+    shrinkImage(f, 768).then(function (dataUrl) {
       $('proofPrev').src = dataUrl; $('proofPrev').classList.remove('hidden');
       sendProof({ image: dataUrl });
     }).catch(function () { toast('Could not read that photo. Try another one.'); });
@@ -1021,7 +1021,8 @@ a { color: var(--accent); }
     if (!s.configured) { $('tgText').innerHTML = 'The bot token is not set on the server yet. Run the setup script again and paste your BotFather token.'; a.innerHTML = ''; return; }
     if (s.error) { $('tgText').textContent = 'Telegram error: ' + s.error; a.innerHTML = ''; return; }
     if (s.connected) {
-      $('tgText').innerHTML = '<span class="status ok"><span class="dot"></span>Connected to @' + esc(s.bot || 'bot') + '</span><br>Due reminders go to your phone even when both PCs are off. You can also message the bot to add tasks.';
+      $('tgText').innerHTML = '<span class="status ok"><span class="dot"></span>Connected to @' + esc(s.bot || 'bot') + '</span><br>Due reminders go to your phone even when both PCs are off. You can also message the bot to add tasks.' +
+        (s.last_error ? '<br><span style="color:var(--warn)">\u26a0\ufe0f Last problem (' + esc(when(s.last_error.at)) + '): <b>' + esc(s.last_error.where) + '</b>, ' + esc(s.last_error.msg) + '</span>' : '');
       a.innerHTML = '<button class="btn small" id="tgTest">Send test</button><button class="btn small ghost" id="tgOff">Disconnect</button>';
       $('tgTest').onclick = function () { api('POST', '/api/telegram/test').then(function () { toast('Sent. Check your phone.'); }).catch(function (e) { toast(e.message); }); };
       $('tgOff').onclick = function () { api('POST', '/api/telegram/disconnect').then(loadTelegram); };

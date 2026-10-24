@@ -10,7 +10,9 @@ const URGENCIES = ['low', 'medium', 'high'];
 const NAG = { medium: { every: 30, max: 6 }, high: { every: 25, max: Infinity } };
 const QUIET = { from: 0, to: 7 }; // no nagging between 00:00 and 07:00 local time
 const URGENCY_EMOJI = { low: '🟢', medium: '🟠', high: '🔴' };
-const VISION_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
+// Photo checkers, tried in order; each gets a time limit so the bot always answers
+const VISION_MODELS = ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/meta/llama-4-scout-17b-16e-instruct'];
+const VISION_TIMEOUT_MS = 12000;
 const DAY = 86400000;
 
 // Adds new columns to databases created by older versions (runs once per worker instance).
@@ -56,7 +58,7 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(migrate(env).then(async () => {
       await sendDueReminders(env);
-      try { await maybeSendBrief(env); } catch (e) { console.error('morning plan failed', e); }
+      try { await maybeSendBrief(env); } catch (e) { await noteError(env, 'Morning plan', e); }
     }));
   },
 };
@@ -81,7 +83,7 @@ async function route(request, env, ctx) {
     const secret = await hookSecret(env);
     if (method !== 'POST' || path !== '/telegram/' + secret) return new Response('Not found', { status: 404 });
     const update = await request.json().catch(() => null);
-    if (update) ctx.waitUntil(handleTelegram(update, env));
+    if (update) ctx.waitUntil(handleTelegram(update, env).catch((e) => noteError(env, 'Bot message', e)));
     return new Response('ok');
   }
 
@@ -290,7 +292,7 @@ async function sendDueReminders(env) {
   ).bind(now, now).all()).results;
   for (const row of early.map(normalize)) {
     if (chat && env.TELEGRAM_TOKEN) {
-      try { await sendEarly(env, chat, row, now); } catch (e) { console.error('telegram early send failed', e); }
+      try { await sendEarly(env, chat, row, now); } catch (e) { await noteError(env, 'Telegram (early reminder #' + row.id + ')', e); }
     }
     await env.DB.prepare('UPDATE tasks SET early_sent = 1 WHERE id = ?').bind(row.id).run();
   }
@@ -301,7 +303,7 @@ async function sendDueReminders(env) {
   ).bind(now).all();
   for (const row of results.map(normalize)) {
     if (chat && env.TELEGRAM_TOKEN) {
-      try { await sendReminder(env, chat, row); } catch (e) { console.error('telegram send failed', e); }
+      try { await sendReminder(env, chat, row); } catch (e) { await noteError(env, 'Telegram (reminder #' + row.id + ')', e); }
     }
     if (NAG[row.urgency]) {
       // medium/high: keep this occurrence open and start nagging until it's done
@@ -339,7 +341,7 @@ async function sendDueReminders(env) {
       continue;
     }
     if (chat && env.TELEGRAM_TOKEN) {
-      try { await sendNag(env, chat, row, row.nag_count + 1); } catch (e) { console.error('telegram nag failed', e); }
+      try { await sendNag(env, chat, row, row.nag_count + 1); } catch (e) { await noteError(env, 'Telegram (repeat reminder #' + row.id + ')', e); }
     }
     await env.DB.prepare('UPDATE tasks SET nag_count = nag_count + 1, next_nag_at = ? WHERE id = ?')
       .bind(now + rule.every * 60000, row.id).run();
@@ -431,6 +433,7 @@ async function telegramStatus(env, origin) {
     try { username = (await tg(env, 'getMe', {})).username; await setSetting(env, 'bot_username', username); } catch (e) { out.error = e.message; }
   }
   out.bot = username || null;
+  out.last_error = await lastError(env);
   if (username) out.link = 'https://t.me/' + username + '?start=' + (await linkCode(env));
   out.webhook = (await getSetting(env, 'webhook_url')) === origin + '/telegram/' + (await hookSecret(env));
   return out;
@@ -443,6 +446,7 @@ async function telegramSetup(env, origin) {
   try {
     await tg(env, 'setMyCommands', { commands: [
       { command: 'plan', description: "Today's plan" },
+      { command: 'status', description: 'Check the bot and see the last problem' },
       { command: 'list', description: 'Show open tasks' },
       { command: 'add', description: 'Add a task, e.g. /add Call mom at 18:30' },
       { command: 'done', description: 'Complete a task by number, e.g. /done 12' },
@@ -568,6 +572,10 @@ async function handleTelegram(update, env) {
     return reply(updated.done ? '✅ Done: ' + esc(task.title) : '✅ Done for now. Next: ' + fmtTime(env, updated.remind_at));
   }
   if (cmd === '/plan') { await sendBrief(env, chatId); return; }
+  if (cmd === '/status') {
+    const e = await lastError(env);
+    return reply('✅ Bot is connected.\n\n' + (e ? '⚠️ Last problem (' + fmtTime(env, e.at) + '):\n<b>' + esc(e.where) + '</b>\n<code>' + esc(e.msg) + '</code>' : 'No problems in the last 7 days.'));
+  }
   const body = cmd === '/add' ? arg : cmd.startsWith('/') ? '' : text;
   if (!body) return reply(HELP);
   let list = await aiParseAll(env, body);
@@ -606,7 +614,7 @@ async function finishTask(env, task, note) {
 // Which high task a photo is for: the reminder it replies to, else the open high tasks (due ones first).
 async function handleProofPhoto(env, chatId, msg) {
   const sizes = msg.photo.slice().sort((a, b) => (a.width || 0) - (b.width || 0));
-  const pick = sizes.filter((p) => (p.width || 0) <= 1280).pop() || sizes[0];
+  const pick = sizes.filter((p) => (p.width || 0) <= 800).pop() || sizes[0];
   const caption = String(msg.caption || '').slice(0, 300);
   const replied = String(msg.reply_to_message?.text || '').match(/#(\d+)/);
   let task = replied ? await getTask(env, Number(replied[1])) : null;
@@ -630,14 +638,14 @@ async function handleProofPhoto(env, chatId, msg) {
 }
 
 async function checkTelegramProof(env, chatId, task, fileId, caption) {
-  await tg(env, 'sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+  await tg(env, 'sendMessage', { chat_id: chatId, parse_mode: 'HTML', text: '📸 Got it. Checking your photo for <b>' + esc(task.title) + '</b>…' }).catch(() => {});
   let dataUrl = null;
   try {
     const f = await tg(env, 'getFile', { file_id: fileId });
     const res = await fetch('https://api.telegram.org/file/bot' + env.TELEGRAM_TOKEN + '/' + f.file_path);
     const bytes = new Uint8Array(await res.arrayBuffer());
     dataUrl = 'data:image/jpeg;base64,' + toBase64(bytes);
-  } catch (e) { console.error('photo download failed', e); }
+  } catch (e) { await noteError(env, 'Photo download', e); }
   const r = await proveTask(env, task, dataUrl, caption, false);
   if (r.done) {
     let s = '✅ <b>' + esc(task.title) + '</b> is done.' + (r.reason ? '\n<i>' + esc(r.reason) + '</i>' : '');
@@ -677,18 +685,21 @@ async function checkPhoto(env, task, dataUrl, caption) {
     '(random selfie, ceiling, black screen, meme, a different activity).',
     'Answer JSON only: {"done": true or false, "reason": "one short friendly sentence to the user, in English, saying what you see"}',
   ].join(' ');
-  try {
-    const out = await env.AI.run(VISION_MODEL, {
-      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl } }] }],
-      max_tokens: 150, temperature: 0.1,
-    });
-    let r = out && out.response;
-    if (r && typeof r === 'object') r = JSON.stringify(r);
-    const m = String(r || '').match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const o = JSON.parse(m[0]);
-    return { done: o.done === true || o.done === 'true', reason: String(o.reason || '').slice(0, 200) };
-  } catch (e) { console.error('photo check failed', e); return null; }
+  for (const model of VISION_MODELS) {
+    try {
+      const out = await withTimeout(env.AI.run(model, {
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+        max_tokens: 150, temperature: 0.1,
+      }), VISION_TIMEOUT_MS, 'Photo check (' + model.split('/').pop() + ')');
+      let r = out && out.response;
+      if (r && typeof r === 'object') r = JSON.stringify(r);
+      const m = String(r || '').match(/\{[\s\S]*\}/);
+      if (!m) throw new Error('unreadable answer: ' + String(r || '').slice(0, 120));
+      const o = JSON.parse(m[0]);
+      return { done: o.done === true || o.done === 'true', reason: String(o.reason || '').slice(0, 200) };
+    } catch (e) { await noteError(env, 'Photo check', e); }
+  }
+  return null;
 }
 
 function toBase64(bytes) {
@@ -974,6 +985,20 @@ function fmtClock(env, ts) {
 }
 
 // ---------------------------------------------------------------- misc helpers
+// Remember the last problem (Telegram or AI) so it can be shown in Settings and with /status
+async function noteError(env, where, e) {
+  console.error(where, e);
+  try { await setSetting(env, 'last_error', JSON.stringify({ at: Date.now(), where, msg: String((e && e.message) || e).slice(0, 300) })); } catch (_) {}
+}
+async function lastError(env) {
+  try { const v = JSON.parse((await getSetting(env, 'last_error')) || 'null'); return v && Date.now() - v.at < 7 * DAY ? v : null; } catch (_) { return null; }
+}
+function withTimeout(promise, ms, label) {
+  let t;
+  return Promise.race([promise, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(label + ' took longer than ' + Math.round(ms / 1000) + 's')), ms); })])
+    .finally(() => clearTimeout(t));
+}
+
 async function getSetting(env, key) {
   const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
   return row ? row.value : null;
