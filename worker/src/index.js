@@ -5,6 +5,12 @@ import UI_HTML from './ui.html';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const REPEATS = ['none', 'daily', 'weekly'];
 const LEADS = [0, 10, 30, 60, 1440]; // "remind me before" options, in minutes
+const URGENCIES = ['low', 'medium', 'high'];
+// How hard each urgency pushes after the reminder is due: minutes between nags, and how many (high = until proof)
+const NAG = { medium: { every: 30, max: 6 }, high: { every: 25, max: Infinity } };
+const QUIET = { from: 0, to: 7 }; // no nagging between 00:00 and 07:00 local time
+const URGENCY_EMOJI = { low: '🟢', medium: '🟠', high: '🔴' };
+const VISION_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 const DAY = 86400000;
 
 // Adds new columns to databases created by older versions (runs once per worker instance).
@@ -24,6 +30,11 @@ async function migrate(env) {
   for (const sql of [
     'ALTER TABLE tasks ADD COLUMN lead_min INTEGER NOT NULL DEFAULT 0',
     'ALTER TABLE tasks ADD COLUMN early_sent INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE tasks ADD COLUMN urgency TEXT NOT NULL DEFAULT 'low'",
+    'ALTER TABLE tasks ADD COLUMN nag_count INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE tasks ADD COLUMN next_nag_at INTEGER',
+    'ALTER TABLE tasks ADD COLUMN proof_fails INTEGER NOT NULL DEFAULT 0',
+    "ALTER TABLE tasks ADD COLUMN proof_note TEXT NOT NULL DEFAULT ''",
   ]) {
     try { await env.DB.prepare(sql).run(); } catch (e) {
       if (!/duplicate column/i.test(String(e && e.message))) throw e;
@@ -95,11 +106,26 @@ async function route(request, env, ctx) {
     for (const t of list) tasks.push(await createTask(env, t));
     return json({ tasks }, 201);
   }
+  const pm = path.match(/^\/api\/tasks\/(\d+)\/proof$/);
+  if (pm && method === 'POST') {
+    const task = await getTask(env, Number(pm[1]));
+    if (!task) return json({ error: 'Not found' }, 404);
+    const body = await request.json().catch(() => ({}));
+    const img = typeof body.image === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(body.image) ? body.image : null;
+    if (!body.force && !img) return json({ error: 'Add a photo first' }, 400);
+    if (img && img.length > 4_000_000) return json({ error: 'That photo is too big' }, 400);
+    const r = await proveTask(env, task, img, String(body.caption || '').slice(0, 300), !!body.force);
+    return json({ done: r.done, reason: r.reason, fails: r.fails, task: r.task || (await getTask(env, task.id)) });
+  }
   const m = path.match(/^\/api\/tasks\/(\d+)$/);
   if (m) {
     const id = Number(m[1]);
     if (method === 'PATCH') {
       const body = await request.json().catch(() => ({}));
+      if (body.done) {
+        const cur = await getTask(env, id);
+        if (cur && cur.urgency === 'high' && !cur.done) return json({ error: 'This task needs a photo to finish', proof: true }, 400);
+      }
       const task = await updateTask(env, id, body);
       return task ? json({ task }) : json({ error: 'Not found' }, 404);
     }
@@ -177,6 +203,10 @@ function normalize(r) {
     remind_at: r.remind_at == null ? null : Number(r.remind_at),
     repeat: r.repeat || 'none',
     lead_min: Number(r.lead_min || 0),
+    urgency: URGENCIES.includes(r.urgency) ? r.urgency : 'low',
+    nag_count: Number(r.nag_count || 0),
+    proof_fails: Number(r.proof_fails || 0),
+    proof_note: r.proof_note || '',
     done: !!r.done,
     notified: !!r.notified,
     created_at: Number(r.created_at),
@@ -195,6 +225,7 @@ function clean(body) {
   }
   if ('repeat' in body) out.repeat = REPEATS.includes(body.repeat) ? body.repeat : 'none';
   if ('lead_min' in body) { const l = Number(body.lead_min); out.lead_min = LEADS.includes(l) ? l : 0; }
+  if ('urgency' in body) out.urgency = URGENCIES.includes(body.urgency) ? body.urgency : 'low';
   if ('done' in body) out.done = body.done ? 1 : 0;
   return out;
 }
@@ -204,8 +235,8 @@ async function createTask(env, body) {
   if (!t.title) throw new Error('Title is required');
   const now = Date.now();
   const res = await env.DB.prepare(
-    'INSERT INTO tasks (title, details, remind_at, repeat, lead_min, done, notified, early_sent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?)'
-  ).bind(t.title, t.details || '', t.remind_at ?? null, t.repeat || 'none', t.lead_min || 0, now, now).run();
+    'INSERT INTO tasks (title, details, remind_at, repeat, lead_min, urgency, done, notified, early_sent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)'
+  ).bind(t.title, t.details || '', t.remind_at ?? null, t.repeat || 'none', t.lead_min || 0, t.urgency || 'low', now, now).run();
   return getTask(env, res.meta.last_row_id);
 }
 
@@ -216,7 +247,8 @@ async function updateTask(env, id, body) {
   if ('title' in t && !t.title) delete t.title;
 
   // Re-arm the reminder whenever its time or repeat changes.
-  if ('remind_at' in t && t.remind_at !== current.remind_at) { t.notified = 0; t.early_sent = 0; }
+  if ('remind_at' in t && t.remind_at !== current.remind_at) { t.notified = 0; t.early_sent = 0; t.nag_count = 0; t.next_nag_at = null; t.proof_fails = 0; }
+  if (t.done === 1) { t.nag_count = 0; t.next_nag_at = null; } // finished: stop nagging
   if ('repeat' in t && t.repeat !== current.repeat) t.notified = 0;
   if ('lead_min' in t && t.lead_min !== current.lead_min) t.early_sent = 0;
 
@@ -228,6 +260,7 @@ async function updateTask(env, id, body) {
     t.remind_at = nextOccurrence(remindAt, repeat, Math.max(Date.now(), remindAt + 1));
     t.notified = 0;
     t.early_sent = 0;
+    t.proof_fails = 0;
   }
   if (t.done === 0 && current.done && !('remind_at' in t)) t.notified = current.remind_at != null && current.remind_at <= Date.now() ? 1 : 0;
 
@@ -266,20 +299,73 @@ async function sendDueReminders(env) {
   const { results } = await env.DB.prepare(
     'SELECT * FROM tasks WHERE done = 0 AND notified = 0 AND remind_at IS NOT NULL AND remind_at <= ? ORDER BY remind_at LIMIT 25'
   ).bind(now).all();
-  if (!results.length) return early.length;
-
   for (const row of results.map(normalize)) {
     if (chat && env.TELEGRAM_TOKEN) {
       try { await sendReminder(env, chat, row); } catch (e) { console.error('telegram send failed', e); }
     }
-    if (row.repeat !== 'none') {
+    if (NAG[row.urgency]) {
+      // medium/high: keep this occurrence open and start nagging until it's done
+      await env.DB.prepare('UPDATE tasks SET notified = 1, nag_count = 0, next_nag_at = ?, updated_at = ? WHERE id = ?')
+        .bind(now + NAG[row.urgency].every * 60000, now, row.id).run();
+    } else if (row.repeat !== 'none') {
       const next = nextOccurrence(row.remind_at, row.repeat, now + 1);
       await env.DB.prepare('UPDATE tasks SET remind_at = ?, early_sent = 0, updated_at = ? WHERE id = ?').bind(next, now, row.id).run();
     } else {
       await env.DB.prepare('UPDATE tasks SET notified = 1, updated_at = ? WHERE id = ?').bind(now, row.id).run();
     }
   }
-  return early.length + results.length;
+
+  // 3) Nags for medium/high tasks that are still not done
+  const nags = (await env.DB.prepare(
+    "SELECT * FROM tasks WHERE done = 0 AND notified = 1 AND urgency IN ('medium','high') AND next_nag_at IS NOT NULL AND next_nag_at <= ? ORDER BY next_nag_at LIMIT 25"
+  ).bind(now).all()).results.map(normalize);
+  for (const row of nags) {
+    const rule = NAG[row.urgency];
+    // a repeating task (like a gym day) only nags on its own day; after midnight it moves on to the next one
+    if (row.repeat !== 'none' && row.remind_at != null && localNow(env, now).date !== localNow(env, row.remind_at).date) {
+      await env.DB.prepare('UPDATE tasks SET remind_at = ?, notified = 0, early_sent = 0, nag_count = 0, next_nag_at = NULL, proof_fails = 0, updated_at = ? WHERE id = ?')
+        .bind(nextOccurrence(row.remind_at, row.repeat, now + 1), now, row.id).run();
+      continue;
+    }
+    if (!rule || row.nag_count >= rule.max) {
+      await env.DB.prepare('UPDATE tasks SET next_nag_at = NULL WHERE id = ?').bind(row.id).run();
+      continue;
+    }
+    const n = localNow(env, now);
+    if (n.hour >= QUIET.from && n.hour < QUIET.to) {
+      // quiet hours: try again at 07:00
+      const wake = zonedToUtc(n.year, n.month, n.day, QUIET.to, 0, env.TZ || 'Asia/Riyadh');
+      await env.DB.prepare('UPDATE tasks SET next_nag_at = ? WHERE id = ?').bind(wake, row.id).run();
+      continue;
+    }
+    if (chat && env.TELEGRAM_TOKEN) {
+      try { await sendNag(env, chat, row, row.nag_count + 1); } catch (e) { console.error('telegram nag failed', e); }
+    }
+    await env.DB.prepare('UPDATE tasks SET nag_count = nag_count + 1, next_nag_at = ? WHERE id = ?')
+      .bind(now + rule.every * 60000, row.id).run();
+  }
+  return early.length + results.length + nags.length;
+}
+
+async function sendNag(env, chat, t, n) {
+  if (t.urgency === 'high') {
+    return tg(env, 'sendMessage', {
+      chat_id: chat, parse_mode: 'HTML',
+      text: '🔴 Still waiting on <b>' + esc(t.title) + '</b> <i>(#' + t.id + ', reminder ' + (n + 1) + ')</i>\n\n📸 Send a photo of it done to finish it. I\'ll keep reminding you every ' + NAG.high.every + ' min.',
+      reply_markup: proofButtons(t),
+    });
+  }
+  return tg(env, 'sendMessage', {
+    chat_id: chat, parse_mode: 'HTML',
+    text: '🟠 Reminder ' + (n + 1) + ' of ' + (NAG.medium.max + 1) + ' · <b>' + esc(t.title) + '</b> <i>(#' + t.id + ')</i>',
+    reply_markup: reminderButtons(t),
+  });
+}
+
+function proofButtons(t) {
+  const row = [{ text: '10 min', callback_data: 'snooze:' + t.id + ':10' }, { text: '1 hour', callback_data: 'snooze:' + t.id + ':60' }];
+  if (t.proof_fails >= 2) row.unshift({ text: '✅ Done anyway', callback_data: 'force:' + t.id });
+  return { inline_keyboard: [row] };
 }
 
 function untilText(ms) {
@@ -295,16 +381,18 @@ async function sendEarly(env, chat, t, now) {
   s += '\n\n<i>' + fmtTime(env, t.remind_at) + '</i>';
   return tg(env, 'sendMessage', {
     chat_id: chat, text: s, parse_mode: 'HTML',
-    reply_markup: { inline_keyboard: [[{ text: '✅ Done', callback_data: 'done:' + t.id }]] },
+    reply_markup: t.urgency === 'high' ? undefined : { inline_keyboard: [[{ text: '✅ Done', callback_data: 'done:' + t.id }]] },
   });
 }
 
 function reminderText(env, t) {
-  let s = '⏰ <b>' + esc(t.title) + '</b>';
+  let s = (t.urgency === 'low' ? '⏰' : URGENCY_EMOJI[t.urgency]) + ' <b>' + esc(t.title) + '</b>';
   if (t.details) s += '\n\n' + esc(t.details);
   s += '\n\n<i>' + fmtTime(env, t.remind_at);
   if (t.repeat !== 'none') s += ' · repeats ' + t.repeat;
   s += '</i>';
+  if (t.urgency === 'high') s += '\n\n📸 <b>Send a photo of it done</b> to finish it <i>(#' + t.id + ')</i>. I\'ll remind you every ' + NAG.high.every + ' min until then.';
+  else if (t.urgency === 'medium') s += '\n\n<i>I\'ll remind you every ' + NAG.medium.every + ' min until you tap Done.</i>';
   return s;
 }
 
@@ -320,7 +408,7 @@ function reminderButtons(t) {
 
 async function sendReminder(env, chat, t) {
   return tg(env, 'sendMessage', {
-    chat_id: chat, text: reminderText(env, t), parse_mode: 'HTML', reply_markup: reminderButtons(t),
+    chat_id: chat, text: reminderText(env, t), parse_mode: 'HTML', reply_markup: t.urgency === 'high' ? proofButtons(t) : reminderButtons(t),
   });
 }
 
@@ -403,7 +491,22 @@ async function handleTelegram(update, env) {
       }).catch(() => {});
       return;
     }
-    if (task && action === 'done') {
+    if (task && action === 'done' && task.urgency === 'high' && !task.done) {
+      return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: '📸 This one needs a photo. Send a photo of it done.', show_alert: true });
+    }
+    if (action === 'proof') {
+      const fileId = await getSetting(env, 'pending_photo');
+      await tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Checking the photo…' });
+      await tg(env, 'editMessageReplyMarkup', { chat_id: chatId, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      if (!task || !fileId) return tg(env, 'sendMessage', { chat_id: chatId, text: 'Send the photo again, please.' });
+      await setSetting(env, 'pending_photo', '');
+      return checkTelegramProof(env, chatId, task, fileId, await getSetting(env, 'pending_caption'));
+    }
+    if (task && action === 'force') {
+      if (task.proof_fails < 2) return tg(env, 'answerCallbackQuery', { callback_query_id: q.id, text: 'Send a photo first.', show_alert: true });
+      const updated = await finishTask(env, task, 'Done anyway (photo not confirmed)');
+      note = updated.done ? 'Marked done' : 'Done — next: ' + fmtTime(env, updated.remind_at);
+    } else if (task && action === 'done') {
       const updated = await updateTask(env, id, { done: true });
       note = updated.done ? 'Marked done' : 'Done — next: ' + fmtTime(env, updated.remind_at);
     } else if (task && action === 'snooze') {
@@ -423,6 +526,10 @@ async function handleTelegram(update, env) {
   }
 
   const msg = update.message;
+  if (msg && Array.isArray(msg.photo) && msg.photo.length) {
+    if (!owner || String(msg.chat.id) !== owner) return;
+    return handleProofPhoto(env, String(msg.chat.id), msg);
+  }
   if (!msg || typeof msg.text !== 'string') return;
   const chatId = String(msg.chat.id);
   const text = msg.text.trim();
@@ -449,13 +556,14 @@ async function handleTelegram(update, env) {
     const open = (await listTasks(env)).filter((t) => !t.done);
     if (!open.length) return reply('Nothing on your list. 🎉');
     return reply(open.slice(0, 40).map((t) =>
-      '<b>#' + t.id + '</b> ' + esc(t.title) + (t.remind_at ? '\n     <i>' + fmtTime(env, t.remind_at) + (t.repeat !== 'none' ? ' · ' + t.repeat : '') + '</i>' : '')
+      URGENCY_EMOJI[t.urgency] + ' <b>#' + t.id + '</b> ' + esc(t.title) + (t.remind_at ? '\n     <i>' + fmtTime(env, t.remind_at) + (t.repeat !== 'none' ? ' · ' + t.repeat : '') + '</i>' : '')
     ).join('\n'));
   }
   if (cmd === '/done') {
     const id = Number(arg.replace('#', ''));
     const task = id && (await getTask(env, id));
     if (!task) return reply('Send the task number from /list, e.g. <code>/done 12</code>');
+    if (task.urgency === 'high' && !task.done) return reply('🔴 <b>' + esc(task.title) + '</b> needs proof. 📸 Send a photo of it done.');
     const updated = await updateTask(env, id, { done: true });
     return reply(updated.done ? '✅ Done: ' + esc(task.title) : '✅ Done for now. Next: ' + fmtTime(env, updated.remind_at));
   }
@@ -473,6 +581,7 @@ async function handleTelegram(update, env) {
   for (const t of list) made.push(await createTask(env, t));
   const describe = (task) => {
     let s = '';
+    if (task.urgency !== 'low') s += '\n' + URGENCY_EMOJI[task.urgency] + ' ' + (task.urgency === 'high' ? 'High: needs a photo to finish' : 'Medium: reminds every ' + NAG.medium.every + ' min');
     if (task.remind_at) s += '\n⏰ ' + fmtTime(env, task.remind_at);
     if (task.lead_min) s += '\n🔔 ' + untilText(task.lead_min * 60000) + ' before';
     if (task.repeat !== 'none') s += '\n↻ Every ' + (task.repeat === 'daily' ? 'day' : 'week');
@@ -486,6 +595,106 @@ async function handleTelegram(update, env) {
     chat_id: chatId, text: s, parse_mode: 'HTML',
     reply_markup: { inline_keyboard: [[{ text: made.length > 1 ? '↩️ Undo all' : '↩️ Undo', callback_data: 'undo:' + made.map((t) => t.id).join(',') }]] },
   });
+}
+
+// ---------------------------------------------------------------- photo proof (high urgency)
+async function finishTask(env, task, note) {
+  await env.DB.prepare('UPDATE tasks SET proof_note = ?, proof_fails = 0 WHERE id = ?').bind(String(note || '').slice(0, 300), task.id).run();
+  return updateTask(env, task.id, { done: true });
+}
+
+// Which high task a photo is for: the reminder it replies to, else the open high tasks (due ones first).
+async function handleProofPhoto(env, chatId, msg) {
+  const sizes = msg.photo.slice().sort((a, b) => (a.width || 0) - (b.width || 0));
+  const pick = sizes.filter((p) => (p.width || 0) <= 1280).pop() || sizes[0];
+  const caption = String(msg.caption || '').slice(0, 300);
+  const replied = String(msg.reply_to_message?.text || '').match(/#(\d+)/);
+  let task = replied ? await getTask(env, Number(replied[1])) : null;
+  if (!task || task.done || task.urgency !== 'high') {
+    const now = Date.now();
+    const open = (await listTasks(env)).filter((t) => !t.done && t.urgency === 'high')
+      .sort((a, b) => ((a.remind_at ?? Infinity) <= now ? 0 : 1) - ((b.remind_at ?? Infinity) <= now ? 0 : 1) || (a.remind_at ?? Infinity) - (b.remind_at ?? Infinity));
+    if (!open.length) return tg(env, 'sendMessage', { chat_id: chatId, text: 'Photos are for finishing 🔴 high-urgency tasks, and you don\'t have any open right now.' });
+    const due = open.filter((t) => t.remind_at != null && t.remind_at <= now);
+    if (due.length === 1 || open.length === 1) task = due[0] || open[0];
+    else {
+      await setSetting(env, 'pending_photo', pick.file_id);
+      await setSetting(env, 'pending_caption', caption);
+      return tg(env, 'sendMessage', {
+        chat_id: chatId, text: '📸 Which task is this photo for?',
+        reply_markup: { inline_keyboard: open.slice(0, 6).map((t) => [{ text: '🔴 ' + t.title.slice(0, 40), callback_data: 'proof:' + t.id }]) },
+      });
+    }
+  }
+  return checkTelegramProof(env, chatId, task, pick.file_id, caption);
+}
+
+async function checkTelegramProof(env, chatId, task, fileId, caption) {
+  await tg(env, 'sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+  let dataUrl = null;
+  try {
+    const f = await tg(env, 'getFile', { file_id: fileId });
+    const res = await fetch('https://api.telegram.org/file/bot' + env.TELEGRAM_TOKEN + '/' + f.file_path);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    dataUrl = 'data:image/jpeg;base64,' + toBase64(bytes);
+  } catch (e) { console.error('photo download failed', e); }
+  const r = await proveTask(env, task, dataUrl, caption, false);
+  if (r.done) {
+    let s = '✅ <b>' + esc(task.title) + '</b> is done.' + (r.reason ? '\n<i>' + esc(r.reason) + '</i>' : '');
+    if (r.task && !r.task.done && r.task.remind_at) s += '\n\nNext time: ' + fmtTime(env, r.task.remind_at);
+    return tg(env, 'sendMessage', { chat_id: chatId, text: s, parse_mode: 'HTML' });
+  }
+  return tg(env, 'sendMessage', {
+    chat_id: chatId, parse_mode: 'HTML',
+    text: '🤔 ' + esc(r.reason || 'That photo doesn\'t show the task done.') + '\n\nSend another photo of <b>' + esc(task.title) + '</b> <i>(#' + task.id + ')</i>' + (r.fails >= 2 ? ', or tap Done anyway.' : '.'),
+    reply_markup: r.fails >= 2 ? { inline_keyboard: [[{ text: '✅ Done anyway', callback_data: 'force:' + task.id }]] } : undefined,
+  });
+}
+
+// Shared by the bot and the app. Returns { done, reason, fails, task }.
+async function proveTask(env, task, dataUrl, caption, force) {
+  if (force) {
+    if (task.proof_fails < 2) return { done: false, reason: 'Send a photo first.', fails: task.proof_fails };
+    return { done: true, reason: 'Done anyway', fails: task.proof_fails, task: await finishTask(env, task, 'Done anyway (photo not confirmed)') };
+  }
+  const v = dataUrl ? await checkPhoto(env, task, dataUrl, caption) : null;
+  if (!v) {
+    // the AI couldn't look at it (unavailable or error): don't block the user
+    return { done: true, reason: 'Photo received (couldn\'t be checked automatically).', fails: 0, task: await finishTask(env, task, 'Photo received, not checked') };
+  }
+  if (v.done) return { done: true, reason: v.reason, fails: 0, task: await finishTask(env, task, v.reason) };
+  await env.DB.prepare('UPDATE tasks SET proof_fails = proof_fails + 1 WHERE id = ?').bind(task.id).run();
+  return { done: false, reason: v.reason, fails: task.proof_fails + 1 };
+}
+
+async function checkPhoto(env, task, dataUrl, caption) {
+  if (!env.AI) return null;
+  const prompt = [
+    'Task: "' + task.title + '"' + (task.details ? '. Details: ' + task.details.slice(0, 200) : '') + (caption ? '. The user wrote: "' + caption + '"' : '') + '.',
+    'Does this photo reasonably show that the task was done (or the result of doing it)? Be fair, not strict:',
+    'a workout task can be proven with gym equipment or being at the gym, an assignment with a submission screen or the finished work,',
+    'a payment with a receipt or confirmation, shopping with the items or a receipt. Reject photos that are clearly unrelated',
+    '(random selfie, ceiling, black screen, meme, a different activity).',
+    'Answer JSON only: {"done": true or false, "reason": "one short friendly sentence to the user, in English, saying what you see"}',
+  ].join(' ');
+  try {
+    const out = await env.AI.run(VISION_MODEL, {
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+      max_tokens: 150, temperature: 0.1,
+    });
+    let r = out && out.response;
+    if (r && typeof r === 'object') r = JSON.stringify(r);
+    const m = String(r || '').match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const o = JSON.parse(m[0]);
+    return { done: o.done === true || o.done === 'true', reason: String(o.reason || '').slice(0, 200) };
+  } catch (e) { console.error('photo check failed', e); return null; }
+}
+
+function toBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
 }
 
 // ---------------------------------------------------------------- AI (Cloudflare Workers AI)
@@ -524,8 +733,9 @@ const PARSE_SCHEMA = {
     day_titles: { type: 'array', items: { type: 'string' } },
     repeat: { type: 'string', enum: ['none', 'daily', 'weekly'] },
     early_minutes: { type: 'integer' },
+    urgency: { type: 'string', enum: URGENCIES },
   },
-  required: ['title', 'date', 'time', 'weekdays', 'day_titles', 'repeat', 'early_minutes'],
+  required: ['title', 'date', 'time', 'weekdays', 'day_titles', 'repeat', 'early_minutes', 'urgency'],
 };
 
 // Weekday names written in the note (English or Arabic), in order, without repeats.
@@ -567,6 +777,7 @@ async function aiParseAll(env, text) {
     '- time: HH:MM in 24h, or "" if no time is mentioned. "7 and half" = 07:30, "7:30 pm" = 19:30. "morning"=09:00, "noon"=12:00, "afternoon"=15:00, "evening"=19:00, "tonight"=21:00. "in 2 hours" means now plus 2 hours (set the date too).',
     '- repeat: "daily" for every day, "weekly" for every week, every <weekday>, or a routine on several weekdays; otherwise "none".',
     '- early_minutes: if the note asks for an earlier heads-up ("remind me 30 min before", "a day before"), the minutes (10, 30, 60 or 1440), otherwise 0.',
+    '- urgency: "high" if the note says urgent, important, must, critical, ASAP, deadline, عاجل, مهم, ضروري, لازم; "medium" if it says somewhat important or "don\'t forget"; otherwise "low". Remove these words from the title.',
     'Never invent days or times the note does not imply.',
   ].join('\n');
   let raw;
@@ -637,7 +848,8 @@ function cleanAiTask(env, o, title, wd, now, n) {
   if (remind_at == null) repeat = 'none';
   const em = Number(o.early_minutes) || 0;
   const lead_min = em <= 0 || remind_at == null ? 0 : LEADS.slice(1).reduce((a, b) => (Math.abs(b - em) < Math.abs(a - em) ? b : a));
-  return { title, details: String(o.details || '').trim().slice(0, 2000), remind_at, repeat, lead_min };
+  const urgency = URGENCIES.includes(o.urgency) ? o.urgency : 'low';
+  return { title, details: String(o.details || '').trim().slice(0, 2000), remind_at, repeat, lead_min, urgency };
 }
 
 // ---------------------------------------------------------------- morning plan
@@ -672,7 +884,7 @@ async function sendBrief(env, chat) {
   const doneToday = all.filter((t) => t.done && t.remind_at != null && t.remind_at >= dayStart && t.remind_at < dayEnd);
   const tomorrow = open.filter((t) => t.remind_at != null && t.remind_at >= dayEnd && t.remind_at < dayEnd + DAY);
 
-  const line = (t) => '• ' + fmtClock(env, t.remind_at) + '  ' + esc(t.title);
+  const line = (t) => URGENCY_EMOJI[t.urgency] + ' ' + fmtClock(env, t.remind_at) + '  ' + esc(t.title) + (t.urgency === 'high' ? ' 📸' : '');
   const dateLabel = new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(now));
   let s = '☀️ <b>Your plan for ' + dateLabel + '</b>\n';
   if (today.length) s += '\n<b>Today</b>\n' + today.map(line).join('\n') + '\n';

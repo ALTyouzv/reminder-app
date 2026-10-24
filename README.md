@@ -70,6 +70,7 @@ Open your app address in Safari, tap **Share**, then **Add to Home Screen**. It 
 
 - **Type it the way you'd say it** and press **Enter**, for example `Quiz Thursday 10am, remind me a day before`. The AI fills in the date, time, repeat and early heads-up, and shows what it understood. Press **Enter** again to save, or change anything first. Works in English and Arabic.
 - You can also set things yourself: details, a reminder time (or a quick option like *Tomorrow 9 am*), a heads-up before it's due (10 min, 30 min, 1 hour or 1 day early), and daily or weekly repeats.
+- **Urgency:** pick 🟢 Low, 🟠 Medium or 🔴 High for each task. Medium reminds you every 30 minutes (up to 6 times) until you tap Done. High reminds you every 25 minutes until you send a **photo** of the task done; the AI checks the photo matches the task (after 2 rejected photos you get a "Done anyway" button). No repeat reminders between midnight and 7 am.
 - **Calendar tab:** see your week (Sunday to Saturday). On a big screen each day shows its tasks; on a phone or the small popup you get a week strip with dots. Tap a day to see its tasks, or **+ Add task** to add one on that day.
 - Click a task to edit or delete it. Click the circle to mark it done.
 - While the app is open, a due reminder shows a banner with a sound, plus a Windows notification if you allow it in Settings.
@@ -84,6 +85,8 @@ Open your app address in Safari, tap **Share**, then **Add to Home Screen**. It 
 | `Check oven in 20m` | Reminder in 20 minutes |
 | `Buy milk` | Adds it with no reminder |
 | `/plan` | Today's plan right now |
+| *a photo* | Finishes a 🔴 high task (the AI checks the photo first) |
+| `Urgent: pay fees by 5pm` | Adds a 🔴 high-urgency task |
 | `/list` | Shows your open tasks with numbers |
 | `/done 12` | Completes task #12 |
 

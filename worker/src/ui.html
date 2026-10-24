@@ -144,6 +144,35 @@ details.done-group summary::-webkit-details-marker { display: none; }
 .sep { height: 1px; background: var(--line); }
 a { color: var(--accent); }
 
+/* urgency */
+:root { --u-low: #4f8a1c; --u-med: #d98a12; --u-high: #d4423b; --u-low-soft: #e8f2dc; --u-med-soft: #fbefd9; --u-high-soft: #fbe5e3; }
+@media (prefers-color-scheme: dark) { :root { --u-low: #7cbf45; --u-med: #f0a83c; --u-high: #f0716a; --u-low-soft: #1f2e14; --u-med-soft: #3a2a10; --u-high-soft: #3d1b19; } }
+.urg-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.urg-label { font-size: 12px; color: var(--muted); width: 100%; }
+.urg { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 6px 13px; font-size: 13.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+.urg .ud { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.urg.on { color: var(--text); font-weight: 600; }
+.urg[data-u="low"] .ud { background: var(--u-low); } .urg[data-u="low"].on { background: var(--u-low-soft); border-color: var(--u-low); }
+.urg[data-u="medium"] .ud { background: var(--u-med); } .urg[data-u="medium"].on { background: var(--u-med-soft); border-color: var(--u-med); }
+.urg[data-u="high"] .ud { background: var(--u-high); } .urg[data-u="high"].on { background: var(--u-high-soft); border-color: var(--u-high); }
+.urg-hint { font-size: 12.5px; width: 100%; margin-top: 2px; }
+.urg-hint.medium { color: var(--u-med); } .urg-hint.high { color: var(--u-high); }
+.udot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+.udot.low { background: var(--u-low); } .udot.medium { background: var(--u-med); } .udot.high { background: var(--u-high); }
+.item.u-medium .check { border-color: var(--u-med); } .item.u-high .check { border-color: var(--u-high); }
+.item.done .udot { opacity: .45; }
+.tag.proof { background: var(--u-high-soft); color: var(--u-high); font-weight: 600; }
+/* photo proof box */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+.modal .box { background: var(--panel); border-radius: 16px; padding: 20px 18px 16px; width: 100%; max-width: 380px; text-align: center; box-shadow: var(--shadow); }
+.modal h3 { margin: 6px 0 4px; font-size: 17px; }
+.modal p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.modal .cam { width: 46px; height: 46px; border-radius: 50%; background: var(--u-high-soft); color: var(--u-high); display: grid; place-items: center; margin: 0 auto; }
+.modal .cam svg { width: 24px; height: 24px; }
+.modal img.prev { max-width: 100%; max-height: 220px; border-radius: 10px; margin: 0 0 12px; display: block; margin-inline: auto; }
+.modal .res { font-size: 14px; margin: 0 0 12px; padding: 9px 11px; border-radius: 10px; text-align: left; }
+.modal .res.ok { background: var(--accent-soft); color: var(--accent); } .modal .res.no { background: var(--warn-soft); color: var(--warn); }
+.modal .row2 { display: flex; gap: 8px; } .modal .row2 .btn { flex: 1; padding: 10px; }
 /* AI + morning plan */
 .ai-note { font-size: 13.5px; color: var(--accent); background: var(--accent-soft); border-radius: 10px; padding: 8px 11px; }
 .ai-multi { margin: 6px 0 0; padding-left: 18px; color: var(--text); }
@@ -177,6 +206,7 @@ a { color: var(--accent); }
 .dots { display: flex; gap: 3px; height: 6px; margin-top: 2px; }
 .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: block; }
 .dots i.over { background: var(--danger); }
+.dots i.low { background: var(--u-low); } .dots i.medium { background: var(--u-med); } .dots i.high { background: var(--u-high); }
 .dots i.done { background: var(--faint); opacity: .6; }
 .chips { display: none; }
 .daylist-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 4px 8px; }
@@ -201,6 +231,11 @@ a { color: var(--accent); }
   .chip2.done { background: var(--panel-2); color: var(--faint); text-decoration: line-through; }
   .chip2.done .tm { color: var(--faint); }
   .chip2.proj { background: transparent; border: 1px dashed var(--line); }
+  .chip2.low { background: var(--u-low-soft); box-shadow: inset 3px 0 0 var(--u-low); } .chip2.low .tm { color: var(--u-low); }
+  .chip2.medium { background: var(--u-med-soft); box-shadow: inset 3px 0 0 var(--u-med); } .chip2.medium .tm { color: var(--u-med); }
+  .chip2.high { background: var(--u-high-soft); box-shadow: inset 3px 0 0 var(--u-high); } .chip2.high .tm { color: var(--u-high); }
+  .chip2.done { background: var(--panel-2); box-shadow: none; }
+  .chip2.done .tm { color: var(--faint); }
   .chip2.more { background: transparent; color: var(--muted); padding: 2px 6px; }
 }
 @media (max-width: 759.98px) { .day .hd { display: contents; } }
@@ -317,7 +352,7 @@ a { color: var(--accent); }
     <div class="more hidden" id="newMore">
       <div class="ai-note hidden" id="aiNote"></div>
       <textarea id="newDetails" placeholder="Details or context (optional)" dir="auto"></textarea>
-      <div class="presets" id="newPresets"></div>
+      <div class="urg-row" id="newUrg" role="radiogroup" aria-label="Urgency"></div>
       <div class="fields">
         <label class="field">Remind me at<input type="datetime-local" id="newWhen"></label>
         <label class="field">Repeat
@@ -331,6 +366,22 @@ a { color: var(--accent); }
   </form>
 
   <div id="lists"></div>
+</div>
+
+<div id="proof" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="proofTitle">
+  <div class="box">
+    <div class="cam"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h2l2-3h6l2 3h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13" r="3.5"/></svg></div>
+    <h3 id="proofTitle">Prove it's done</h3>
+    <p id="proofText">Take or upload a photo of the finished task.</p>
+    <img class="prev hidden" id="proofPrev" alt="">
+    <div class="res hidden" id="proofRes"></div>
+    <input type="file" id="proofFile" accept="image/*" capture="environment" class="hidden">
+    <div class="row2">
+      <button class="btn primary" id="proofPick">Take photo</button>
+      <button class="btn hidden" id="proofForce">Done anyway</button>
+      <button class="btn ghost" id="proofCancel">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
@@ -464,10 +515,13 @@ a { color: var(--accent); }
     }
     if (x.lead_min && x.remind_at != null && !x.done) tags += '<span class="tag">🔔 ' + leadShort(x.lead_min) + ' before</span>';
     if (x.repeat !== 'none') tags += '<span class="tag">↻ ' + (x.repeat === 'daily' ? 'Every day' : 'Every week') + '</span>';
-    return '<div class="item' + (x.done ? ' done' : '') + '" data-id="' + x.id + '">' +
+    var u = x.urgency || 'low';
+    if (u === 'high' && !x.done) tags += '<span class="tag proof">📸 Photo needed</span>';
+    if (x.done && x.proof_note) tags += '<span class="tag" title="' + esc(x.proof_note) + '">📸 ' + esc(x.proof_note.length > 48 ? x.proof_note.slice(0, 46) + '…' : x.proof_note) + '</span>';
+    return '<div class="item u-' + u + (x.done ? ' done' : '') + '" data-id="' + x.id + '">' +
       '<button class="check" data-act="toggle" aria-label="' + (x.done ? 'Mark not done' : 'Mark done') + '">' + CHECK + '</button>' +
       '<div class="body" data-act="edit">' +
-        '<div class="t" dir="auto">' + esc(x.title) + '</div>' +
+        '<div class="t" dir="auto"><span class="udot ' + u + '" title="' + u + ' urgency"></span>' + esc(x.title) + '</div>' +
         (x.details ? '<div class="d" dir="auto">' + esc(x.details) + '</div>' : '') +
         (tags ? '<div class="meta">' + tags + '</div>' : '') +
       '</div></div>';
@@ -477,6 +531,7 @@ a { color: var(--accent); }
     return '<form class="edit" data-id="' + x.id + '">' +
       '<input class="title" name="title" value="' + esc(x.title) + '" dir="auto" maxlength="300" required>' +
       '<textarea name="details" placeholder="Details or context" dir="auto">' + esc(x.details) + '</textarea>' +
+      '<div class="urg-row edit-urg" data-cur="' + (x.urgency || 'low') + '"><span class="urg-label">Urgency</span>' + urgPills(x.urgency || 'low') + '</div>' +
       '<div class="fields">' +
         '<label class="field">Remind me at<input type="datetime-local" name="when" value="' + toLocalInput(x.remind_at) + '"></label>' +
         '<label class="field">Repeat<select name="repeat">' +
@@ -585,11 +640,11 @@ a { color: var(--accent); }
       var d = addDays(ws, i), list = dayTasks(d), dt = new Date(d);
       var cls = 'day' + (d === t0 ? ' today' : '') + (d < t0 ? ' past' : '') + (d === state.selDay ? ' sel' : '');
       var dots = list.slice(0, 3).map(function (o) {
-        return '<i class="' + (o.task.done && !o.proj ? 'done' : (!o.proj && o.at <= t ? 'over' : '')) + '"></i>';
+        return '<i class="' + (o.task.done && !o.proj ? 'done' : (o.task.urgency || 'low')) + '"></i>';
       }).join('');
       var chips = list.slice(0, 4).map(function (o) {
-        var c = 'chip2' + (o.task.done && !o.proj ? ' done' : '') + (!o.task.done && !o.proj && o.at <= t ? ' over' : '') + (o.proj ? ' proj' : '');
-        return '<span class="' + c + '" dir="auto"><span class="tm">' + esc(clock(o.at)) + (o.proj ? ' ↻' : '') + '</span>' + esc(o.task.title) + '</span>';
+        var c = 'chip2 ' + (o.task.urgency || 'low') + (o.task.done && !o.proj ? ' done' : '') + (o.proj ? ' proj' : '');
+        return '<span class="' + c + '" dir="auto"><span class="tm">' + esc(clock(o.at)) + (o.proj ? ' ↻' : '') + (o.task.urgency === 'high' && !o.task.done ? ' 📸' : '') + '</span>' + esc(o.task.title) + '</span>';
       }).join('');
       if (list.length > 4) chips += '<span class="chip2 more">+' + (list.length - 4) + ' more</span>';
       html += '<button class="' + cls + '" data-day="' + d + '" aria-label="' + esc(dt.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })) + ', ' + list.length + ' tasks">' +
@@ -657,20 +712,25 @@ a { color: var(--accent); }
 
   // ---- composer
   var chosen = null;
-  function renderPresets() {
-    $('newPresets').innerHTML = presets().map(function (p, i) {
-      var on = (p.ts === null && chosen === null && $('newWhen').value === '') ? false : (chosen !== null && p.ts === chosen);
-      return '<button type="button" class="preset' + (on ? ' on' : '') + '" data-i="' + i + '">' + esc(p.label) + '</button>';
+  var URG = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
+  var URG_HINT = { low: '', medium: 'Medium: reminds you every 30 min until you tap Done.', high: 'High: reminds you every 25 min until you send a photo of it done.' };
+  var newUrgency = 'low';
+  function urgPills(cur) {
+    return URG.map(function (u) {
+      return '<button type="button" class="urg' + (cur === u[0] ? ' on' : '') + '" data-u="' + u[0] + '" role="radio" aria-checked="' + (cur === u[0]) + '"><span class="ud"></span>' + u[1] + '</button>';
     }).join('');
+  }
+  function renderPresets() { // (now the urgency picker)
+    $('newUrg').innerHTML = '<span class="urg-label">Urgency</span>' + urgPills(newUrgency) +
+      (URG_HINT[newUrgency] ? '<span class="urg-hint ' + newUrgency + '">' + URG_HINT[newUrgency] + '</span>' : '');
   }
   $('newTitle').addEventListener('focus', function () { $('newMore').classList.remove('hidden'); renderPresets(); });
   $('newTitle').addEventListener('input', function () { $('newMore').classList.remove('hidden'); });
-  $('newPresets').addEventListener('click', function (e) {
-    var b = e.target.closest('.preset'); if (!b) return;
-    var p = presets()[Number(b.dataset.i)];
-    chosen = p.ts; $('newWhen').value = toLocalInput(p.ts); renderPresets();
+  $('newUrg').addEventListener('click', function (e) {
+    var b = e.target.closest('.urg'); if (!b) return;
+    newUrgency = b.dataset.u; renderPresets();
   });
-  $('newWhen').addEventListener('input', function () { chosen = fromLocalInput($('newWhen').value); renderPresets(); });
+  $('newWhen').addEventListener('input', function () { chosen = fromLocalInput($('newWhen').value); });
   $('newDetails').addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('composer').requestSubmit(); });
   $('composer').addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { $('newMore').classList.add('hidden'); document.activeElement.blur(); }
@@ -683,6 +743,7 @@ a { color: var(--accent); }
     if (p.remind_at != null) bits.push(when(p.remind_at));
     if (p.repeat !== 'none') bits.push(p.repeat === 'daily' ? 'every day' : 'every week');
     if (p.lead_min) bits.push(leadShort(p.lead_min) + ' early heads-up');
+    if (p.urgency && p.urgency !== 'low') bits.push(p.urgency === 'high' ? 'high urgency (photo to finish)' : 'medium urgency');
     return bits.join(' · ');
   }
   $('newTitle').addEventListener('input', function () { if (!$('newTitle').value.trim() || multi) hideAiNote(); });
@@ -696,13 +757,14 @@ a { color: var(--accent); }
     api('POST', '/api/parse', { text: title }).then(function (d) {
       var p = d.parsed || {};
       if (d.tasks && d.tasks.length > 1) return showMulti(d.tasks);
-      var nothing = p.remind_at == null && p.repeat === 'none' && !p.lead_min && !p.details && (p.title || '').trim() === title;
+      var nothing = p.remind_at == null && p.repeat === 'none' && !p.lead_min && !p.details && (!p.urgency || p.urgency === 'low') && (p.title || '').trim() === title;
       if (nothing) return doAdd();
       $('newTitle').value = p.title || title;
       $('newDetails').value = p.details || '';
       $('newWhen').value = toLocalInput(p.remind_at); chosen = p.remind_at;
       $('newRepeat').value = p.repeat || 'none';
       $('newLead').value = String(p.lead_min || 0);
+      if (newUrgency === 'low' && p.urgency) newUrgency = p.urgency;
       $('newMore').classList.remove('hidden'); renderPresets();
       var sum = aiSummary(p), note = $('aiNote');
       var past = p.remind_at != null && p.remind_at <= now() && p.repeat === 'none';
@@ -715,13 +777,14 @@ a { color: var(--accent); }
   // several tasks found in one note: list them, and Add saves them all
   var multi = null;
   function showMulti(list) {
+    if (newUrgency !== 'low') list.forEach(function (t) { if (!t.urgency || t.urgency === 'low') t.urgency = newUrgency; });
     multi = list; aiDone = true;
     $('newMore').classList.remove('hidden'); hideMultiFields(true);
     var note = $('aiNote'); note.className = 'ai-note';
     note.innerHTML = '\u2728 Found <b>' + list.length + ' tasks</b>. Press Add to save them all.' +
       '<ul class="ai-multi">' + list.map(function (t) {
         var sum = aiSummary(t);
-        return '<li dir="auto"><b>' + esc(t.title) + '</b>' + (sum ? '<br><span>' + esc(sum) + '</span>' : '') + '</li>';
+        return '<li dir="auto"><span class="udot ' + (t.urgency || 'low') + '"></span><b>' + esc(t.title) + '</b>' + (sum ? '<br><span>' + esc(sum) + '</span>' : '') + '</li>';
       }).join('') + '</ul>';
     $('newTitle').focus();
   }
@@ -731,21 +794,21 @@ a { color: var(--accent); }
       var list = multi; $('addBtn').disabled = true;
       api('POST', '/api/tasks/bulk', { tasks: list }).then(function (d) {
         d.tasks.forEach(replaceTask);
-        multi = null; $('newTitle').value = ''; hideAiNote(); render();
+        multi = null; $('newTitle').value = ''; newUrgency = 'low'; hideAiNote(); renderPresets(); render();
         toast('Added ' + d.tasks.length + ' tasks');
       }).catch(function (e) { toast(e.message); }).then(function () { $('addBtn').disabled = false; });
       return;
     }
     var title = $('newTitle').value.trim();
     if (!title) return;
-    var body ={ title: title, details: $('newDetails').value.trim(), remind_at: fromLocalInput($('newWhen').value), repeat: $('newRepeat').value, lead_min: Number($('newLead').value) };
+    var body ={ title: title, details: $('newDetails').value.trim(), remind_at: fromLocalInput($('newWhen').value), repeat: $('newRepeat').value, lead_min: Number($('newLead').value), urgency: newUrgency };
     if (body.remind_at != null && body.remind_at <= now() - 60000 && body.repeat === 'none') {
       if (!confirmPast()) return;
     }
     $('addBtn').disabled = true;
     api('POST', '/api/tasks', body).then(function (d) {
       replaceTask(d.task);
-      $('newTitle').value = ''; $('newDetails').value = ''; $('newWhen').value = ''; $('newRepeat').value = 'none'; $('newLead').value = '0'; chosen = null;
+      $('newTitle').value = ''; $('newDetails').value = ''; $('newWhen').value = ''; $('newRepeat').value = 'none'; $('newLead').value = '0'; chosen = null; newUrgency = 'low';
       hideAiNote(); renderPresets(); render(); flash(d.task.id);
       toast(d.task.remind_at ? 'Added · reminder ' + when(d.task.remind_at) : 'Added');
       $('newTitle').focus();
@@ -755,6 +818,12 @@ a { color: var(--accent); }
 
   // ---- list actions
   $('lists').addEventListener('click', function (e) {
+    var ub = e.target.closest('.edit-urg .urg');
+    if (ub) {
+      var row = ub.parentNode; row.dataset.cur = ub.dataset.u;
+      Array.prototype.forEach.call(row.querySelectorAll('.urg'), function (b) { var on = b === ub; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+      return;
+    }
     var el = e.target.closest('[data-act]'); if (!el) return;
     var host = el.closest('[data-id]'); if (!host) return;
     var id = Number(host.dataset.id), act = el.dataset.act;
@@ -772,7 +841,8 @@ a { color: var(--accent); }
   $('lists').addEventListener('submit', function (e) {
     e.preventDefault();
     var f = e.target, id = Number(f.dataset.id);
-    var body = { title: f.title.value.trim(), details: f.details.value.trim(), remind_at: fromLocalInput(f.when.value), repeat: f.repeat.value, lead_min: Number(f.lead.value) };
+    var eu = f.querySelector('.edit-urg');
+    var body = { title: f.title.value.trim(), details: f.details.value.trim(), remind_at: fromLocalInput(f.when.value), repeat: f.repeat.value, lead_min: Number(f.lead.value), urgency: eu ? eu.dataset.cur : 'low' };
     if (!body.title) return;
     api('PATCH', '/api/tasks/' + id, body).then(function (d) {
       replaceTask(d.task); state.editing = null; render(); flash(id); toast('Saved');
@@ -784,11 +854,68 @@ a { color: var(--accent); }
 
   function toggle(task) {
     if (!task) return;
+    if (task.urgency === 'high' && !task.done) return openProof(task);
     api('PATCH', '/api/tasks/' + task.id, { done: !task.done }).then(function (d) {
       replaceTask(d.task); render();
       if (!task.done && !d.task.done) toast('Done for now · next ' + when(d.task.remind_at));
       else if (d.task.done) toast('Nice, done.');
     }).catch(function (e) { toast(e.message); });
+  }
+
+  // ---- photo proof for high-urgency tasks
+  var proofTask = null, proofBusy = false;
+  function openProof(task) {
+    proofTask = task;
+    $('proofText').textContent = 'Take or upload a photo of \u201c' + task.title + '\u201d done.';
+    $('proofPrev').classList.add('hidden'); $('proofRes').classList.add('hidden');
+    $('proofForce').classList.toggle('hidden', (task.proof_fails || 0) < 2);
+    $('proofPick').textContent = 'Take photo'; $('proofPick').disabled = false;
+    $('proof').classList.remove('hidden');
+  }
+  function closeProof() { $('proof').classList.add('hidden'); proofTask = null; $('proofFile').value = ''; }
+  $('proofCancel').addEventListener('click', closeProof);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && proofTask && !proofBusy) closeProof(); });
+  $('proof').addEventListener('click', function (e) { if (e.target === $('proof') && !proofBusy) closeProof(); });
+  $('proofPick').addEventListener('click', function () { $('proofFile').click(); });
+  $('proofFile').addEventListener('change', function () {
+    var f = $('proofFile').files[0]; if (!f || !proofTask) return;
+    shrinkImage(f, 1024).then(function (dataUrl) {
+      $('proofPrev').src = dataUrl; $('proofPrev').classList.remove('hidden');
+      sendProof({ image: dataUrl });
+    }).catch(function () { toast('Could not read that photo. Try another one.'); });
+  });
+  $('proofForce').addEventListener('click', function () { sendProof({ force: true }); });
+  function sendProof(body) {
+    var t = proofTask; if (!t) return;
+    proofBusy = true; $('proofPick').disabled = true; $('proofPick').textContent = 'Checking…';
+    api('POST', '/api/tasks/' + t.id + '/proof', body).then(function (d) {
+      if (d.task) replaceTask(d.task);
+      var res = $('proofRes'); res.classList.remove('hidden');
+      if (d.done) {
+        res.className = 'res ok'; res.textContent = '\u2705 ' + (d.reason || 'Done.');
+        $('proofPick').textContent = 'Done';
+        render(); setTimeout(closeProof, 1600); toast('Nice, done.');
+      } else {
+        res.className = 'res no'; res.textContent = '\ud83e\udd14 ' + (d.reason || 'That photo doesn\u2019t show it done.') + (d.fails >= 2 ? ' Try again, or tap Done anyway.' : ' Try another photo.');
+        if (d.task) proofTask = d.task;
+        $('proofForce').classList.toggle('hidden', d.fails < 2);
+        $('proofPick').textContent = 'Try another photo';
+      }
+    }).catch(function (e) { toast(e.message); $('proofPick').textContent = 'Take photo'; }).then(function () { proofBusy = false; $('proofPick').disabled = false; $('proofFile').value = ''; });
+  }
+  // shrink big phone photos before uploading (keeps it fast and inside the AI's limits)
+  function shrinkImage(file, max) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, max / Math.max(img.width, img.height));
+        var c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+      img.src = url;
+    });
   }
 
   // ---- in-window alerts while the app is open
